@@ -34,3 +34,19 @@ services:
       - /data/Workspace/SysMo/ENCODE/notebooks:/root/host_home/notebooks
       - /data/Workspace/SysMo/ENCODE/jenie:/root/host_home/pylibs/jenie
       - /data/Workspace/SysMo/ENCODE/external:/root/host_home/external
+
+  scrnaseq-sanger:
+    container_name: scrnaseq-sanger
+    build:
+      context: build/scrnaseq-sanger
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: quay.io/hemberg-group/scrna-seq-course:v3.13
+    ports:
+      - 8888:8888
+    environment:
+      - PASSWORD=jupyter
+    #  - GRANT_SUDO=yes
+    #user: root
+    volumes:
+      - /data/Workspace/SysMo/ENCODE/notebooks/scrnaseq-sanger:/home/jovyan/tutorial

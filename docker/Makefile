@@ -15,3 +15,12 @@ scanpy/up:
 
 scanpy/bash:
 	docker-compose exec scanpy /bin/bash
+
+scrnaseq-sanger/build:
+	docker-compose build scrnaseq-sanger
+
+scrnaseq-sanger/up:
+	docker-compose up scrnaseq-sanger
+
+scrnaseq-sanger/bash:
+	docker-compose exec scrnaseq-sanger /bin/bash
