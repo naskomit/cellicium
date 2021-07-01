@@ -24,3 +24,12 @@ scrnaseq-sanger/up:
 
 scrnaseq-sanger/bash:
 	docker-compose exec scrnaseq-sanger /bin/bash
+
+cellicium/build:
+	docker-compose build cellicium
+
+cellicium/up:
+	docker-compose up cellicium
+
+cellicium/bash:
+	docker-compose exec cellicium /bin/bash

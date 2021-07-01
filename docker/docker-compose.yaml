@@ -50,3 +50,23 @@ services:
     #user: root
     volumes:
       - /data/Workspace/SysMo/ENCODE/notebooks/scrnaseq-sanger:/home/jovyan/tutorial
+
+
+  cellicium:
+    container_name: cellicium
+    build:
+      context: build/cellicium
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: jupyter/scipy-notebook
+    ports:
+      - 8888-8892:8888-8892
+    # command:
+    #   - sleep
+    #   - "infinity"
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+    volumes:
+      - /data/Workspace/SysMo/ENCODE/notebooks:/home/jovyan/notebooks
+      - /data/Workspace/SysMo/ENCODE/jenie:/home/jovyan/pylibs/jenie
+      - /data/Workspace/SysMo/ENCODE/external:/home/jovyan/external
