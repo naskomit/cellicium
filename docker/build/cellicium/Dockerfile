@@ -13,6 +13,7 @@ ARG featurecounts_version="2.0.1"
 
 USER root
 
+# libtool m4 automake bison flex
 RUN apt-get update && \
   apt-get -y install curl zlib1g-dev libbz2-dev liblzma-dev \
   libncurses5-dev libncursesw5-dev libcurl4-openssl-dev libcairo2-dev libpango1.0-dev tcl-dev tk-dev
@@ -124,4 +125,4 @@ RUN \
 # This must be the last set of commands (otherwise pip breaks)
 RUN \
   pip uninstall -y numba && \
-  pip install numba==0.52.0 --ignore-installed
+  pip install numba==0.52.* --ignore-installed

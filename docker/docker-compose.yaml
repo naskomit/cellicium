@@ -17,6 +17,6 @@ services:
       JUPYTER_ENABLE_LAB: "yes"
       PYTHONPATH: "/home/jovyan/pylibs"
     volumes:
-      - /data/Workspace/SysMo/ENCODE/notebooks:/home/jovyan/notebooks
-      - /data/Workspace/SysMo/ENCODE/cellicium:/home/jovyan/pylibs/cellicium
-      - /data/Workspace/SysMo/ENCODE/external:/home/jovyan/external
+      - ${ABS_TOPLEVEL}/notebooks:/home/jovyan/notebooks
+      - ${ABS_TOPLEVEL}/cellicium:/home/jovyan/pylibs/cellicium
+      - ${ABS_TOPLEVEL}/external:/home/jovyan/external
