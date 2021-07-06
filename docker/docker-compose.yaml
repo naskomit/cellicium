@@ -1,72 +1,22 @@
-# docker-compose file for building the base images
 version: '3.4'
 
 services:
-  vivarium:
-    container_name: bassenji
-    build:
-      context: build/bassenji
-      dockerfile: Dockerfile
-      args:
-        BASE_IMAGE: jupyter/scipy-notebook
-    ports:
-      - 7890:8888
-    environment:
-      - JUPYTER_ENABLE_LAB=yes
-    volumes:
-      - /data/Workspace/SysMo/vivarium/vivarium-sysmo/notebooks:/home/jovyan/work
-
-  scanpy:
-    container_name: scanpy
-    build:
-      context: build/scanpy
-      dockerfile: Dockerfile
-      args:
-        BASE_IMAGE: leanderd/single-cell-analysis:210114
-    ports:
-      - 8888-8892:8888-8892
-    command:
-      - sleep
-      - "infinity"
-    environment:
-      - JUPYTER_ENABLE_LAB=yes
-    volumes:
-      - /data/Workspace/SysMo/ENCODE/notebooks:/root/host_home/notebooks
-      - /data/Workspace/SysMo/ENCODE/jenie:/root/host_home/pylibs/jenie
-      - /data/Workspace/SysMo/ENCODE/external:/root/host_home/external
-
-  scrnaseq-sanger:
-    container_name: scrnaseq-sanger
-    build:
-      context: build/scrnaseq-sanger
-      dockerfile: Dockerfile
-      args:
-        BASE_IMAGE: quay.io/hemberg-group/scrna-seq-course:v3.13
-    ports:
-      - 8888:8888
-    environment:
-      - PASSWORD=jupyter
-    #  - GRANT_SUDO=yes
-    #user: root
-    volumes:
-      - /data/Workspace/SysMo/ENCODE/notebooks/scrnaseq-sanger:/home/jovyan/tutorial
-
-
   cellicium:
     container_name: cellicium
     build:
       context: build/cellicium
       dockerfile: Dockerfile
       args:
-        BASE_IMAGE: jupyter/scipy-notebook
+        BASE_IMAGE: jupyter/scipy-notebook:8d32a5208ca1
     ports:
       - 8888-8892:8888-8892
     # command:
     #   - sleep
     #   - "infinity"
     environment:
-      - JUPYTER_ENABLE_LAB=yes
+      JUPYTER_ENABLE_LAB: "yes"
+      PYTHONPATH: "/home/jovyan/pylibs"
     volumes:
       - /data/Workspace/SysMo/ENCODE/notebooks:/home/jovyan/notebooks
-      - /data/Workspace/SysMo/ENCODE/jenie:/home/jovyan/pylibs/jenie
+      - /data/Workspace/SysMo/ENCODE/cellicium:/home/jovyan/pylibs/cellicium
       - /data/Workspace/SysMo/ENCODE/external:/home/jovyan/external

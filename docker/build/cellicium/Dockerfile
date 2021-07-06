@@ -114,6 +114,13 @@ RUN  pip install \
 #  pip install kipoi
 
 
+# Jupyter utilities
+#jupyter labextension install @jupyter-widgets/jupyterlab-manager && \
+RUN \
+  pip install ipyaggrid && \
+  jupyter labextension install ipyaggrid
+
+
 # This must be the last set of commands (otherwise pip breaks)
 RUN \
   pip uninstall -y numba && \

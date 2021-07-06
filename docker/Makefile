@@ -1,35 +1,11 @@
-bassenji/build:
-	docker-compose build bassenji
-
-bassenji/up:
-	docker-compose up bassenji
-
-bassenji/bash:
-	docker-compose exec bassenji /bin/bash
-
-scanpy/build:
-	docker-compose build scanpy
-
-scanpy/up:
-	docker-compose up scanpy
-
-scanpy/bash:
-	docker-compose exec scanpy /bin/bash
-
-scrnaseq-sanger/build:
-	docker-compose build scrnaseq-sanger
-
-scrnaseq-sanger/up:
-	docker-compose up scrnaseq-sanger
-
-scrnaseq-sanger/bash:
-	docker-compose exec scrnaseq-sanger /bin/bash
-
 cellicium/build:
 	docker-compose build cellicium
 
 cellicium/up:
 	docker-compose up cellicium
+
+cellicium/prebuilt:
+	docker-compose -f docker-compose.yaml -f docker-compose.prebuilt.yaml up --build cellicium
 
 cellicium/bash:
 	docker-compose exec cellicium /bin/bash

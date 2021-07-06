@@ -1,0 +1,7 @@
+version: '3.4'
+
+services:
+  cellicium:
+    build:
+      dockerfile: Dockerfile.prebuilt
+#    image: naskomit/cellicium:latest
