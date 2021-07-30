@@ -22,14 +22,14 @@ import random
 
 from . import io
 from .network import AE_types
-from .hyper import hyper
+# from .hyper import hyper
 
 import numpy as np
 import tensorflow as tf
-import keras.optimizers as opt
-from keras.callbacks import TensorBoard, ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
-from keras import backend as K
-from keras.preprocessing.image import Iterator
+import tensorflow.keras.optimizers as opt
+from tensorflow.keras.callbacks import TensorBoard, ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras import backend as K
+from tensorflow.keras.preprocessing.image import Iterator
 
 
 def train(adata, network, output_dir=None, optimizer='RMSprop', learning_rate=None,
@@ -102,14 +102,14 @@ def train(adata, network, output_dir=None, optimizer='RMSprop', learning_rate=No
 
 def train_with_args(args):
 
-    tf.compat.v1.keras.backend.set_session(
-        tf.compat.v1.Session(
-            config=tf.compat.v1.ConfigProto(
-                intra_op_parallelism_threads=args.threads,
-                inter_op_parallelism_threads=args.threads,
-            )
-        )
-    )
+    # tf.compat.v1.keras.backend.set_session(
+    #     tf.compat.v1.Session(
+    #         config=tf.compat.v1.ConfigProto(
+    #             intra_op_parallelism_threads=args.threads,
+    #             inter_op_parallelism_threads=args.threads,
+    #         )
+    #     )
+    # )
     # set seed for reproducibility
     random.seed(42)
     np.random.seed(42)
@@ -117,9 +117,9 @@ def train_with_args(args):
     os.environ['PYTHONHASHSEED'] = '0'
 
     # do hyperpar optimization and exit
-    if args.hyper:
-        hyper(args)
-        return
+    # if args.hyper:
+    #     hyper(args)
+    #     return
 
     adata = io.read_dataset(args.input,
                             transpose=(not args.transpose), # assume gene x cell by default
