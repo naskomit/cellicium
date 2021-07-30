@@ -11,3 +11,5 @@ There are two ways to setup *Cellicium* via docker containers: using prebuilt im
 cd docker
 make cellicium/prebuilt
 ```
+
+## Fetching Data
