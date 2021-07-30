@@ -109,3 +109,24 @@ def plot_arrows_3d(adata, arrows, color_gradients = None, show = True, fig = Non
         fig.show()
     else:
         return fig
+
+
+def compare_series(series, prefix = 'Component', components = None, n_comp = None):
+    if n_comp is None:
+        n_comp = series[0]['y'].shape[1]
+    if components is None:
+        components = [f'{prefix}{i_comp + 1}' for i_comp in range(n_comp)]
+    if n_comp > 5:
+        n_row = int(np.ceil(n_comp / 5))
+        fig, axes = plt.subplots(n_row, 5, figsize = (15, 5 * n_row))
+        axes = axes.flatten()
+    else:
+        fig, axes = plt.subplots(1, n_comp, figsize = (15, 5))
+    for i_comp in range(n_comp):
+        for i_ser in range(len(series)):
+            x = series[i_ser]['x']
+            y = series[i_ser]['y'][:, i_comp]
+            lab = series[i_ser].get('label', f'Series {i_ser}')
+            axes[i_comp].scatter(x, y, label = lab, s = 2)
+        axes[i_comp].legend()
+        axes[i_comp].set_title(components[i_comp])

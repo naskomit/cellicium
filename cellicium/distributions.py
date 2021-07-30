@@ -278,3 +278,7 @@ def fit_distribution(param):
         "x_off": x_off,
         "x_on": x_on
     }
+
+
+def fit_cycle_distribution(adata, gene):
+    pass
