@@ -1,1 +1,2 @@
-FROM naskomit/cellicium:1.2
+ARG VERSION_NUMBER
+FROM naskomit/cellicium:${VERSION_NUMBER}
