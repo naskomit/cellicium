@@ -121,6 +121,10 @@ RUN \
   pip install ipyaggrid && \
   jupyter labextension install ipyaggrid
 
+# Various python libraries
+RUN \
+  pip install vdom
+
 
 # This must be the last set of commands (otherwise pip breaks)
 RUN \

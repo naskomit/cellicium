@@ -32,13 +32,15 @@ def fit_matrix(X, V, n_comp = 10, use_bias = True):
     model.compile(
         optimizer = 'adam',
         loss = tf.keras.losses.MeanSquaredError(),
-        metrics = ['accuracy']
+        metrics = ['cosine_similarity']
     )
-    training = model.fit(X, V, epochs=300, verbose = False)
-    final_loss = training.history['loss'][-1]
-    final_accuracy = training.history['accuracy'][-1]
-    print(f'Final loss: {final_loss}')
-    print(f'Final accuracy: {final_accuracy}')
+    training = model.fit(X, V, epochs = 300, verbose = False)
+    loss = training.history['loss']
+    cosine_similarity = training.history['cosine_similarity']
+    print(f'Initial loss: {loss[0]}')
+    print(f'Initial accuracy: {cosine_similarity[0]}')
+    print(f'Final loss: {loss[-1]}')
+    print(f'Final accuracy: {cosine_similarity[-1]}')
     V_pred = model.predict(X)
     result = {
         'W': model.layers[1].weights[0].numpy(),
