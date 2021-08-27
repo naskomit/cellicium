@@ -126,7 +126,12 @@ RUN \
   pip install vdom
 
 
-# This must be the last set of commands (otherwise pip breaks)
+# Temporary libraries to be moved up in the appropriate section
 RUN \
-  pip uninstall -y numba && \
-  pip install numba==0.52.* --ignore-installed
+  pip install tensorflow-probability==0.13.* && \
+  pip install xeus-python
+
+# This must be the last set of commands (otherwise pip breaks)
+#RUN \
+#  pip uninstall -y numba && \
+#  pip install numba==0.52.* --ignore-installed

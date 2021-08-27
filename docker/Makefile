@@ -16,7 +16,13 @@ cellicium/service:
 cellicium/bash:
 	export ABS_TOPLEVEL=$(ABS_TOPLEVEL) && docker-compose exec cellicium /bin/bash
 
+cellicium/tensorboard:
+	export ABS_TOPLEVEL=$(ABS_TOPLEVEL) && docker-compose exec cellicium tensorboard --logdir notebooks/sysmo/cell-cycle/logs --bind_all
+
 cellicium/push:
 	echo 'docker image ls docker_cellicium'
 	echo 'docker tag CONTAINERID naskomit/cellicium:1.x'
 	echo 'docker push naskomit/cellicium:1.x'
+
+oath2/up:
+	export ABS_TOPLEVEL=$(ABS_TOPLEVEL) && docker-compose up oath2

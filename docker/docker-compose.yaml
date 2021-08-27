@@ -10,6 +10,7 @@ services:
         BASE_IMAGE: jupyter/scipy-notebook:8d32a5208ca1
     ports:
       - 8888-8892:8888-8892
+      - 6006:6006
     # command:
     #   - sleep
     #   - "infinity"
@@ -20,3 +21,11 @@ services:
       - ${ABS_TOPLEVEL}/notebooks:/home/jovyan/notebooks
       - ${ABS_TOPLEVEL}/cellicium:/home/jovyan/pylibs/cellicium
       - ${ABS_TOPLEVEL}/external:/home/jovyan/external
+
+  oath2:
+    container_name: oath2
+    build:
+      context: build/oath2
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: quay.io/oauth2-proxy/oauth2-proxy:v7.1.3

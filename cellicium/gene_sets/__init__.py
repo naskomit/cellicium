@@ -14,17 +14,29 @@ class GeneSetManager():
         data_file_name = 'Macosko_cell_cycle_genes.txt'
         data_file_loc = path.join(path.dirname(__file__), data_file_name)
         data = pd.read_csv(data_file_loc, sep = '\t')
+        g1s_genes = data['IG1.S'].dropna().values
         s_genes = data['S'].dropna().values
         g2m_genes = data['G2.M'].dropna().values
         m_genes = data['M'].dropna().values
-        if group == 'S':
-            return s_genes
+        result = None
+        if group == 'G1S':
+            result = data['IG1.S']
+        elif group == 'S':
+            result = data['S']
         elif group == 'G2M':
-            return g2m_genes
+            result = data['G2.M']
         elif group == 'M':
-            return m_genes
-        else:
+            result = data['M']
+        elif group == 'MG1':
+            result = data['M.G1']
+
+        if result is None:
             raise ValueError(f'Unknown cell cycle gene group ${group}')
+
+        return result.dropna().values
+
+    def cell_cycle_cyclebase(self, group: str):
+        pass
 
     def tf_interactions_dorothea(self):
         """
