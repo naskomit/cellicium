@@ -1,4 +1,3 @@
-from . import qc
+from . import preprocessing as pp
 from . import tools as tl
-from . import plots as pl
-from . import pca
+from . import plotting as pl

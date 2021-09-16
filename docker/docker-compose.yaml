@@ -17,6 +17,8 @@ services:
     environment:
       JUPYTER_ENABLE_LAB: "yes"
       PYTHONPATH: "/home/jovyan/pylibs"
+      GRANT_SUDO: "yes" # Only works if user set to root
+    # user: root
     volumes:
       - ${ABS_TOPLEVEL}/notebooks:/home/jovyan/notebooks
       - ${ABS_TOPLEVEL}/cellicium:/home/jovyan/pylibs/cellicium

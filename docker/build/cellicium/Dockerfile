@@ -69,20 +69,12 @@ RUN curl -fsSL https://github.com/arq5x/bedtools2/releases/download/v${bedtools_
 # Switch back to the jovyan user
 USER jovyan
 
-# Jupyter utilities
-RUN \
-  pip install plotly==4.14.3 "ipywidgets>=7.5" && \
-  pip install jupyterlab_widgets && \
-  jupyter labextension install jupyterlab-plotly@4.14.3 && \
-  pip install tqdm ipympl aquirdturtle_collapsible_headings \
-    boto3 awscli==1.19.*
-
-
 # Machine learning
 RUN \
   pip install scikit-learn==0.24.* && \
   pip install umap-learn==0.5.* && \
   pip install tensorflow==2.5.* && \
+  pip install tensorflow-probability==0.13.* && \
   pip install pymc3==3.11.* && \
   pip install torch && \
   pip install torch-scatter && \
@@ -114,24 +106,28 @@ RUN  pip install \
 #  pip install biocrnpyler[all] && \
 #  pip install kipoi
 
-
 # Jupyter utilities
-#jupyter labextension install @jupyter-widgets/jupyterlab-manager && \
 RUN \
-  pip install ipyaggrid && \
-  jupyter labextension install ipyaggrid
+  pip install plotly==5.3.1 "ipywidgets>=7.6" && \
+  jupyter labextension install @jupyter-widgets/jupyterlab-manager && \
+  pip install tqdm ipympl aquirdturtle_collapsible_headings boto3 awscli==1.19.* && \
+  pip install vdom
+
+# pip install ipyaggrid && \
+# jupyter labextension install ipyaggrid && \
+# pip install jupyterlab_widgets && \
+# jupyter labextension install jupyterlab-plotly@4.14.3 && \
+
 
 # Various python libraries
-RUN \
-  pip install vdom
 
 
 # Temporary libraries to be moved up in the appropriate section
 RUN \
-  pip install tensorflow-probability==0.13.* && \
   pip install xeus-python
 
 # This must be the last set of commands (otherwise pip breaks)
-#RUN \
-#  pip uninstall -y numba && \
-#  pip install numba==0.52.* --ignore-installed
+# If this is not done, scanpy.pp.pca does not work
+RUN \
+  pip uninstall -y numba && \
+  pip install numba==0.52.* --ignore-installed
