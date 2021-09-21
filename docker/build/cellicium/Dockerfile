@@ -108,24 +108,22 @@ RUN  pip install \
 
 # Jupyter utilities
 RUN \
+  pip install xeus-python && \
   pip install plotly==5.3.1 "ipywidgets>=7.6" && \
   jupyter labextension install @jupyter-widgets/jupyterlab-manager && \
   pip install tqdm ipympl aquirdturtle_collapsible_headings boto3 awscli==1.19.* && \
-  pip install vdom
+  pip install vdom && \
+  pip install ipyaggrid && \
+  jupyter labextension install ipyaggrid
 
-# pip install ipyaggrid && \
-# jupyter labextension install ipyaggrid && \
+# Unnecessary (???)
 # pip install jupyterlab_widgets && \
 # jupyter labextension install jupyterlab-plotly@4.14.3 && \
 
 
-# Various python libraries
-
-
 # Temporary libraries to be moved up in the appropriate section
 RUN \
-  pip install xeus-python
-
+  pip install scvi-tools scikit-misc
 # This must be the last set of commands (otherwise pip breaks)
 # If this is not done, scanpy.pp.pca does not work
 RUN \

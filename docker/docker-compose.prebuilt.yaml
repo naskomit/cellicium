@@ -5,5 +5,5 @@ services:
     build:
       dockerfile: Dockerfile.prebuilt
       args:
-        VERSION_NUMBER: "1.2"
+        VERSION_NUMBER: "1.3"
 #    image: naskomit/cellicium:latest

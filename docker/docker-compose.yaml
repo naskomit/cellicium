@@ -23,6 +23,7 @@ services:
       - ${ABS_TOPLEVEL}/notebooks:/home/jovyan/notebooks
       - ${ABS_TOPLEVEL}/cellicium:/home/jovyan/pylibs/cellicium
       - ${ABS_TOPLEVEL}/external:/home/jovyan/external
+      - /data/Workspace/SysMo/NeurIPS:/home/jovyan/neurips
 
   oath2:
     container_name: oath2

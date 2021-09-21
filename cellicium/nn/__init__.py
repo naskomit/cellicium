@@ -5,7 +5,8 @@ import tensorflow.keras as tfk
 import tensorflow_probability as tfp
 from tqdm.notebook import tqdm
 import matplotlib.pyplot as plt
-from .peak_finding import fit_peak
+from .peak_finding import fit_peak, fit_peaks
+from .dca import DCAHandler
 
 # class NormalDistributionVariationalLayer(tfk.layers.Layer):
 #     def __init__(self, reconstr_weight = 1.0, kl_weight = 1.0):
