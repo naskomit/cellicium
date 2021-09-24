@@ -109,12 +109,15 @@ RUN  pip install \
 # Jupyter utilities
 RUN \
   pip install xeus-python && \
-  pip install plotly==5.3.1 "ipywidgets>=7.6" && \
-  jupyter labextension install @jupyter-widgets/jupyterlab-manager && \
+  pip install plotly==5.3.1 "ipywidgets>=7.6" jupyter-dash && \
+#  jupyter labextension install @jupyter-widgets/jupyterlab-manager && \
   pip install tqdm ipympl aquirdturtle_collapsible_headings boto3 awscli==1.19.* && \
   pip install vdom && \
   pip install ipyaggrid && \
+#  pip install qgrid && \
   jupyter labextension install ipyaggrid
+
+#qgrid2
 
 # Unnecessary (???)
 # pip install jupyterlab_widgets && \
@@ -123,9 +126,19 @@ RUN \
 
 # Temporary libraries to be moved up in the appropriate section
 RUN \
-  pip install scvi-tools scikit-misc
-# This must be the last set of commands (otherwise pip breaks)
+  pip install scvi-tools scikit-misc fastcluster scikit-misc
+
+# This must be the last set of pip commands (otherwise pip breaks)
 # If this is not done, scanpy.pp.pca does not work
 RUN \
   pip uninstall -y numba && \
   pip install numba==0.52.* --ignore-installed
+
+#USER root
+#
+#RUN apt-get update && \
+#  apt-get -y install parallel
+#
+## Switch back to the jovyan user
+#USER jovyan
+
