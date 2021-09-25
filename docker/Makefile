@@ -26,3 +26,6 @@ cellicium/push:
 
 oath2/up:
 	export ABS_TOPLEVEL=$(ABS_TOPLEVEL) && docker-compose up oath2
+
+neurips/sync:
+	aws s3 sync NeurIPS s3://cellicium/NeurIPS --profile cellicium

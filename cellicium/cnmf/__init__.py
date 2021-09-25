@@ -1012,35 +1012,34 @@ class CNMFRunner(object):
         filepath = os.path.join(self.work_dir, self.name, filename)
         return Image(filename = filepath, width = 1000, height = 1000)
 
-    def program_usage(self, normalize = True):
+    def program_usage(self):
         consensus = self.get_current_consensus()
         density_threshold_str = f'{consensus["density_threshold"]:.2f}'.replace('.', '_')
         filename = f'{self.name}.usages.k_{consensus["num_components"]}.dt_{density_threshold_str}.consensus.txt'
         filepath = os.path.join(self.work_dir, self.name, filename)
         usage = pd.read_csv(filepath, sep = '\t', index_col = 0)
         usage.columns = ['Program_%s' % i for i in usage.columns]
-        if normalize:
-            usage = usage.div(usage.sum(axis = 1), axis = 0)
         return usage
 
-    def program_genes(self): #, normalize = True
+    def program_genes(self):
         consensus = self.get_current_consensus()
         density_threshold_str = f'{consensus["density_threshold"]:.2f}'.replace('.', '_')
         filename = f'{self.name}.gene_spectra_score.k_{consensus["num_components"]}.dt_{density_threshold_str}.txt'
         filepath = os.path.join(self.work_dir, self.name, filename)
         programs = pd.read_csv(filepath, sep = '\t', index_col = 0).T
         programs.columns = ['Program_%s' % i for i in programs.columns]
-        # if normalize:
-        #     programs = programs.div(programs.sum(axis = 0), axis = 1)
         return programs
 
     def insert_programs(self, adata, copy = True):
         usage = self.program_usage()
+        activity_total = usage.sum(axis = 1)
         genes = self.program_genes()
+        usage = usage.div(activity_total, axis = 0)
         if copy:
             adata = adata.copy()
 
         adata.obs = pd.merge(left = adata.obs, right = usage, how='left', left_index=True, right_index=True)
+        adata.obs['activity_total'] = activity_total
         adata.var = pd.merge(left = adata.var, right = genes, how='left', left_index=True, right_index=True)
         adata.uns['programs'] = usage.columns
         return adata
