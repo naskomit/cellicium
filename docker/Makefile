@@ -16,6 +16,9 @@ cellicium/service:
 cellicium/bash:
 	export ABS_TOPLEVEL=$(ABS_TOPLEVEL) && docker-compose exec cellicium /bin/bash
 
+cellicium/python:
+	export ABS_TOPLEVEL=$(ABS_TOPLEVEL) && docker-compose exec cellicium python
+
 cellicium/tensorboard:
 	export ABS_TOPLEVEL=$(ABS_TOPLEVEL) && docker-compose exec cellicium tensorboard --logdir notebooks/sysmo/cell-cycle/logs --bind_all
 

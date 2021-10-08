@@ -13,7 +13,7 @@ from sklearn.decomposition import non_negative_factorization
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.utils import sparsefuncs
-
+from cellicium.logging import logger as log
 
 from fastcluster import linkage
 from scipy.cluster.hierarchy import leaves_list
@@ -467,6 +467,58 @@ class cNMF():
             save_df_to_npz(spectra, self.paths['iter_spectra'] % (p['n_components'], p['iter']))
 
 
+    def run_nmf_minibatch(self, worker_i=1, total_workers=1, minibatch_size = 5000):
+        """
+        Iteratively run NMF with prespecified parameters.
+
+        Use the `worker_i` and `total_workers` parameters for parallelization.
+
+        Generic kwargs for NMF are loaded from self.paths['nmf_run_parameters'], defaults below::
+
+            ``non_negative_factorization`` default arguments:
+                alpha=0.0
+                l1_ratio=0.0
+                beta_loss='kullback-leibler'
+                solver='mu'
+                tol=1e-4,
+                max_iter=200
+                regularization=None
+                init='random'
+                random_state, n_components are both set by the prespecified self.paths['nmf_replicate_parameters'].
+
+
+        Parameters
+        ----------
+        norm_counts : pandas.DataFrame,
+            Normalized counts dataFrame to be factorized.
+            (Output of ``normalize_counts``)
+
+        run_params : pandas.DataFrame,
+            Parameters for NMF iterations.
+            (Output of ``prepare_nmf_iter_params``)
+
+        """
+        self._initialize_dirs()
+        run_params = load_df_from_npz(self.paths['nmf_replicate_parameters'])
+        norm_counts = sc.read(self.paths['normalized_counts'])
+        _nmf_kwargs = yaml.load(open(self.paths['nmf_run_parameters']), Loader=yaml.FullLoader)
+
+        jobs_for_this_worker = worker_filter(range(len(run_params)), worker_i, total_workers)
+        for idx in jobs_for_this_worker:
+
+            p = run_params.iloc[idx, :]
+            log.info('[Worker %d]. Starting task %d.' % (worker_i, idx))
+            #log.info("Logging stuff")
+            _nmf_kwargs['random_state'] = p['nmf_seed']
+            _nmf_kwargs['n_components'] = p['n_components']
+            minibatch_indices = np.random.choice(norm_counts.obs.shape[0], size = minibatch_size, replace = False)
+
+            (spectra, usages) = self._nmf(norm_counts.X[minibatch_indices, :], _nmf_kwargs)
+            spectra = pd.DataFrame(spectra,
+                                   index=np.arange(1, _nmf_kwargs['n_components']+1),
+                                   columns=norm_counts.var.index)
+            save_df_to_npz(spectra, self.paths['iter_spectra'] % (p['n_components'], p['iter']))
+
     def combine_nmf(self, k, remove_individual_iterations=False):
         run_params = load_df_from_npz(self.paths['nmf_replicate_parameters'])
         print('Combining factorizations for k=%d.'%k)
@@ -749,172 +801,172 @@ class cNMF():
 
 
 
-if __name__=="__main__":
-    """
-    Example commands for now:
-
-        output_dir="/Users/averes/Projects/Melton/Notebooks/2018/07-2018/cnmf_test/"
-
-
-        python cnmf.py prepare --output-dir $output_dir \
-           --name test --counts /Users/averes/Projects/Melton/Notebooks/2018/07-2018/cnmf_test/test_data.df.npz \
-           -k 6 7 8 9 --n-iter 5
-
-        python cnmf.py factorize  --name test --output-dir $output_dir
-
-        THis can be parallelized as such:
-
-        python cnmf.py factorize  --name test --output-dir $output_dir --total-workers 2 --worker-index WORKER_INDEX (where worker_index starts with 0)
-
-        python cnmf.py combine  --name test --output-dir $output_dir
-
-        python cnmf.py consensus  --name test --output-dir $output_dir
-
-    """
-
-    import sys, argparse
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument('command', type=str, choices=['prepare', 'factorize', 'combine', 'consensus', 'k_selection_plot'])
-    parser.add_argument('--name', type=str, help='[all] Name for analysis. All output will be placed in [output-dir]/[name]/...', nargs='?', default='cNMF')
-    parser.add_argument('--output-dir', type=str, help='[all] Output directory. All output will be placed in [output-dir]/[name]/...', nargs='?', default='.')
-
-    parser.add_argument('-c', '--counts', type=str, help='[prepare] Input (cell x gene) counts matrix as df.npz or tab delimited text file')
-    parser.add_argument('-k', '--components', type=int, help='[prepare] Numper of components (k) for matrix factorization. Several can be specified with "-k 8 9 10"', nargs='+')
-    parser.add_argument('-n', '--n-iter', type=int, help='[prepare] Numper of factorization replicates', default=100)
-    parser.add_argument('--total-workers', type=int, help='[all] Total number of workers to distribute jobs to', default=1)
-    parser.add_argument('--seed', type=int, help='[prepare] Seed for pseudorandom number generation', default=None)
-    parser.add_argument('--genes-file', type=str, help='[prepare] File containing a list of genes to include, one gene per line. Must match column labels of counts matrix.', default=None)
-    parser.add_argument('--numgenes', type=int, help='[prepare] Number of high variance genes to use for matrix factorization.', default=2000)
-    parser.add_argument('--tpm', type=str, help='[prepare] Pre-computed (cell x gene) TPM values as df.npz or tab separated txt file. If not provided TPM will be calculated automatically', default=None)
-    parser.add_argument('--beta-loss', type=str, choices=['frobenius', 'kullback-leibler', 'itakura-saito'], help='[prepare] Loss function for NMF.', default='frobenius')
-    parser.add_argument('--densify', dest='densify', help='[prepare] Treat the input data as non-sparse', action='store_true', default=False)
-
-    
-    parser.add_argument('--worker-index', type=int, help='[factorize] Index of current worker (the first worker should have index 0)', default=0)
-    
-    parser.add_argument('--local-density-threshold', type=str, help='[consensus] Threshold for the local density filtering. This string must convert to a float >0 and <=2', default='0.5')
-    parser.add_argument('--local-neighborhood-size', type=float, help='[consensus] Fraction of the number of replicates to use as nearest neighbors for local density filtering', default=0.30)
-    parser.add_argument('--show-clustering', dest='show_clustering', help='[consensus] Produce a clustergram figure summarizing the spectra clustering', action='store_true')
-
-    args = parser.parse_args()
-
-    cnmf_obj = cNMF(output_dir=args.output_dir, name=args.name)
-    cnmf_obj._initialize_dirs()
-    
-    if args.command == 'prepare':
-
-        if args.counts.endswith('.h5ad'):
-            input_counts = sc.read(args.counts)
-        else:
-            ## Load txt or compressed dataframe and convert to scanpy object
-            if args.counts.endswith('.npz'):
-                input_counts = load_df_from_npz(args.counts)
-            else:
-                input_counts = pd.read_csv(args.counts, sep='\t', index_col=0)
-                
-            if args.densify:
-                input_counts = sc.AnnData(X=input_counts.values,
-                                       obs=pd.DataFrame(index=input_counts.index),
-                                       var=pd.DataFrame(index=input_counts.columns))
-            else:
-                input_counts = sc.AnnData(X=sp.csr_matrix(input_counts.values),
-                                       obs=pd.DataFrame(index=input_counts.index),
-                                       var=pd.DataFrame(index=input_counts.columns))
-
-                
-        if sp.issparse(input_counts.X) & args.densify:
-            input_counts.X = np.array(input_counts.X.todense())
- 
-        if args.tpm is None:
-            tpm = compute_tpm(input_counts)
-            sc.write(cnmf_obj.paths['tpm'], tpm)
-        elif args.tpm.endswith('.h5ad'):
-            subprocess.call('cp %s %s' % (args.tpm, cnmf_obj.paths['tpm']), shell=True)
-            tpm = sc.read(cnmf_obj.paths['tpm'])
-        else:
-            if args.tpm.endswith('.npz'):
-                tpm = load_df_from_npz(args.tpm)
-            else:
-                tpm = pd.read_csv(args.tpm, sep='\t', index_col=0)
-            
-            if args.densify:
-                tpm = sc.AnnData(X=tpm.values,
-                            obs=pd.DataFrame(index=tpm.index),
-                            var=pd.DataFrame(index=tpm.columns)) 
-            else:
-                tpm = sc.AnnData(X=sp.csr_matrix(tpm.values),
-                            obs=pd.DataFrame(index=tpm.index),
-                            var=pd.DataFrame(index=tpm.columns)) 
-
-            sc.write(cnmf_obj.paths['tpm'], tpm)
-        
-        if sp.issparse(tpm.X):
-            gene_tpm_mean = np.array(tpm.X.mean(axis=0)).reshape(-1)
-            gene_tpm_stddev = var_sparse_matrix(tpm.X)**.5
-        else:
-            gene_tpm_mean = np.array(tpm.X.mean(axis=0)).reshape(-1)
-            gene_tpm_stddev = np.array(tpm.X.std(axis=0, ddof=0)).reshape(-1)
-            
-            
-        input_tpm_stats = pd.DataFrame([gene_tpm_mean, gene_tpm_stddev],
-             index = ['__mean', '__std']).T
-        save_df_to_npz(input_tpm_stats, cnmf_obj.paths['tpm_stats'])
-        
-        if args.genes_file is not None:
-            highvargenes = open(args.genes_file).read().rstrip().split('\n')
-        else:
-            highvargenes = None
-
-        norm_counts = cnmf_obj.get_norm_counts(input_counts, tpm, num_highvar_genes=args.numgenes,
-                                               high_variance_genes_filter=highvargenes)
-        
-        
-        if norm_counts.X.dtype != np.float64:
-            norm_counts.X = norm_counts.X.astype(np.float64)
-
-        cnmf_obj.save_norm_counts(norm_counts)
-        (replicate_params, run_params) = cnmf_obj.get_nmf_iter_params(ks=args.components, n_iter=args.n_iter, random_state_seed=args.seed, beta_loss=args.beta_loss)
-        cnmf_obj.save_nmf_iter_params(replicate_params, run_params)
-
-
-    elif args.command == 'factorize':
-        cnmf_obj.run_nmf(worker_i=args.worker_index, total_workers=args.total_workers)
-
-    elif args.command == 'combine':
-        run_params = load_df_from_npz(cnmf_obj.paths['nmf_replicate_parameters'])
-
-        if type(args.components) is int:
-            ks = [args.components]
-        elif args.components is None:
-            ks = sorted(set(run_params.n_components))
-        else:
-            ks = args.components
-
-        for k in ks:
-            cnmf_obj.combine_nmf(k)
-
-    elif args.command == 'consensus':
-        run_params = load_df_from_npz(cnmf_obj.paths['nmf_replicate_parameters'])
-
-        if type(args.components) is int:
-            ks = [args.components]
-        elif args.components is None:
-            ks = sorted(set(run_params.n_components))
-        else:
-            ks = args.components
-
-        for k in ks:
-            merged_spectra = load_df_from_npz(cnmf_obj.paths['merged_spectra']%k)
-            cnmf_obj.consensus(k, args.local_density_threshold, args.local_neighborhood_size, args.show_clustering)
-
-    elif args.command == 'k_selection_plot':
-        cnmf_obj.k_selection_plot()
+# if __name__=="__main__":
+#     """
+#     Example commands for now:
+#
+#         output_dir="/Users/averes/Projects/Melton/Notebooks/2018/07-2018/cnmf_test/"
+#
+#
+#         python cnmf.py prepare --output-dir $output_dir \
+#            --name test --counts /Users/averes/Projects/Melton/Notebooks/2018/07-2018/cnmf_test/test_data.df.npz \
+#            -k 6 7 8 9 --n-iter 5
+#
+#         python cnmf.py factorize  --name test --output-dir $output_dir
+#
+#         THis can be parallelized as such:
+#
+#         python cnmf.py factorize  --name test --output-dir $output_dir --total-workers 2 --worker-index WORKER_INDEX (where worker_index starts with 0)
+#
+#         python cnmf.py combine  --name test --output-dir $output_dir
+#
+#         python cnmf.py consensus  --name test --output-dir $output_dir
+#
+#     """
+#
+#     import sys, argparse
+#     parser = argparse.ArgumentParser()
+#
+#     parser.add_argument('command', type=str, choices=['prepare', 'factorize', 'combine', 'consensus', 'k_selection_plot'])
+#     parser.add_argument('--name', type=str, help='[all] Name for analysis. All output will be placed in [output-dir]/[name]/...', nargs='?', default='cNMF')
+#     parser.add_argument('--output-dir', type=str, help='[all] Output directory. All output will be placed in [output-dir]/[name]/...', nargs='?', default='.')
+#
+#     parser.add_argument('-c', '--counts', type=str, help='[prepare] Input (cell x gene) counts matrix as df.npz or tab delimited text file')
+#     parser.add_argument('-k', '--components', type=int, help='[prepare] Numper of components (k) for matrix factorization. Several can be specified with "-k 8 9 10"', nargs='+')
+#     parser.add_argument('-n', '--n-iter', type=int, help='[prepare] Numper of factorization replicates', default=100)
+#     parser.add_argument('--total-workers', type=int, help='[all] Total number of workers to distribute jobs to', default=1)
+#     parser.add_argument('--seed', type=int, help='[prepare] Seed for pseudorandom number generation', default=None)
+#     parser.add_argument('--genes-file', type=str, help='[prepare] File containing a list of genes to include, one gene per line. Must match column labels of counts matrix.', default=None)
+#     parser.add_argument('--numgenes', type=int, help='[prepare] Number of high variance genes to use for matrix factorization.', default=2000)
+#     parser.add_argument('--tpm', type=str, help='[prepare] Pre-computed (cell x gene) TPM values as df.npz or tab separated txt file. If not provided TPM will be calculated automatically', default=None)
+#     parser.add_argument('--beta-loss', type=str, choices=['frobenius', 'kullback-leibler', 'itakura-saito'], help='[prepare] Loss function for NMF.', default='frobenius')
+#     parser.add_argument('--densify', dest='densify', help='[prepare] Treat the input data as non-sparse', action='store_true', default=False)
+#
+#
+#     parser.add_argument('--worker-index', type=int, help='[factorize] Index of current worker (the first worker should have index 0)', default=0)
+#
+#     parser.add_argument('--local-density-threshold', type=str, help='[consensus] Threshold for the local density filtering. This string must convert to a float >0 and <=2', default='0.5')
+#     parser.add_argument('--local-neighborhood-size', type=float, help='[consensus] Fraction of the number of replicates to use as nearest neighbors for local density filtering', default=0.30)
+#     parser.add_argument('--show-clustering', dest='show_clustering', help='[consensus] Produce a clustergram figure summarizing the spectra clustering', action='store_true')
+#
+#     args = parser.parse_args()
+#
+#     cnmf_obj = cNMF(output_dir=args.output_dir, name=args.name)
+#     cnmf_obj._initialize_dirs()
+#
+#     if args.command == 'prepare':
+#
+#         if args.counts.endswith('.h5ad'):
+#             input_counts = sc.read(args.counts)
+#         else:
+#             ## Load txt or compressed dataframe and convert to scanpy object
+#             if args.counts.endswith('.npz'):
+#                 input_counts = load_df_from_npz(args.counts)
+#             else:
+#                 input_counts = pd.read_csv(args.counts, sep='\t', index_col=0)
+#
+#             if args.densify:
+#                 input_counts = sc.AnnData(X=input_counts.values,
+#                                        obs=pd.DataFrame(index=input_counts.index),
+#                                        var=pd.DataFrame(index=input_counts.columns))
+#             else:
+#                 input_counts = sc.AnnData(X=sp.csr_matrix(input_counts.values),
+#                                        obs=pd.DataFrame(index=input_counts.index),
+#                                        var=pd.DataFrame(index=input_counts.columns))
+#
+#
+#         if sp.issparse(input_counts.X) & args.densify:
+#             input_counts.X = np.array(input_counts.X.todense())
+#
+#         if args.tpm is None:
+#             tpm = compute_tpm(input_counts)
+#             sc.write(cnmf_obj.paths['tpm'], tpm)
+#         elif args.tpm.endswith('.h5ad'):
+#             subprocess.call('cp %s %s' % (args.tpm, cnmf_obj.paths['tpm']), shell=True)
+#             tpm = sc.read(cnmf_obj.paths['tpm'])
+#         else:
+#             if args.tpm.endswith('.npz'):
+#                 tpm = load_df_from_npz(args.tpm)
+#             else:
+#                 tpm = pd.read_csv(args.tpm, sep='\t', index_col=0)
+#
+#             if args.densify:
+#                 tpm = sc.AnnData(X=tpm.values,
+#                             obs=pd.DataFrame(index=tpm.index),
+#                             var=pd.DataFrame(index=tpm.columns))
+#             else:
+#                 tpm = sc.AnnData(X=sp.csr_matrix(tpm.values),
+#                             obs=pd.DataFrame(index=tpm.index),
+#                             var=pd.DataFrame(index=tpm.columns))
+#
+#             sc.write(cnmf_obj.paths['tpm'], tpm)
+#
+#         if sp.issparse(tpm.X):
+#             gene_tpm_mean = np.array(tpm.X.mean(axis=0)).reshape(-1)
+#             gene_tpm_stddev = var_sparse_matrix(tpm.X)**.5
+#         else:
+#             gene_tpm_mean = np.array(tpm.X.mean(axis=0)).reshape(-1)
+#             gene_tpm_stddev = np.array(tpm.X.std(axis=0, ddof=0)).reshape(-1)
+#
+#
+#         input_tpm_stats = pd.DataFrame([gene_tpm_mean, gene_tpm_stddev],
+#              index = ['__mean', '__std']).T
+#         save_df_to_npz(input_tpm_stats, cnmf_obj.paths['tpm_stats'])
+#
+#         if args.genes_file is not None:
+#             highvargenes = open(args.genes_file).read().rstrip().split('\n')
+#         else:
+#             highvargenes = None
+#
+#         norm_counts = cnmf_obj.get_norm_counts(input_counts, tpm, num_highvar_genes=args.numgenes,
+#                                                high_variance_genes_filter=highvargenes)
+#
+#
+#         if norm_counts.X.dtype != np.float64:
+#             norm_counts.X = norm_counts.X.astype(np.float64)
+#
+#         cnmf_obj.save_norm_counts(norm_counts)
+#         (replicate_params, run_params) = cnmf_obj.get_nmf_iter_params(ks=args.components, n_iter=args.n_iter, random_state_seed=args.seed, beta_loss=args.beta_loss)
+#         cnmf_obj.save_nmf_iter_params(replicate_params, run_params)
+#
+#
+#     elif args.command == 'factorize':
+#         cnmf_obj.run_nmf(worker_i=args.worker_index, total_workers=args.total_workers)
+#
+#     elif args.command == 'combine':
+#         run_params = load_df_from_npz(cnmf_obj.paths['nmf_replicate_parameters'])
+#
+#         if type(args.components) is int:
+#             ks = [args.components]
+#         elif args.components is None:
+#             ks = sorted(set(run_params.n_components))
+#         else:
+#             ks = args.components
+#
+#         for k in ks:
+#             cnmf_obj.combine_nmf(k)
+#
+#     elif args.command == 'consensus':
+#         run_params = load_df_from_npz(cnmf_obj.paths['nmf_replicate_parameters'])
+#
+#         if type(args.components) is int:
+#             ks = [args.components]
+#         elif args.components is None:
+#             ks = sorted(set(run_params.n_components))
+#         else:
+#             ks = args.components
+#
+#         for k in ks:
+#             merged_spectra = load_df_from_npz(cnmf_obj.paths['merged_spectra']%k)
+#             cnmf_obj.consensus(k, args.local_density_threshold, args.local_neighborhood_size, args.show_clustering)
+#
+#     elif args.command == 'k_selection_plot':
+#         cnmf_obj.k_selection_plot()
 
 @cmproc.exception2either
 def factorize_worker(args):
     cnmf_obj = cNMF(output_dir = args['work_dir'], name = args['name'])
-    cnmf_obj.run_nmf(worker_i = args['worker_id'], total_workers = args['num_workers'])
+    cnmf_obj.run_nmf_minibatch(worker_i = args['worker_id'], total_workers = args['num_workers'])
 
 # import time
     # print(f"Executing task {x}")
@@ -1000,7 +1052,7 @@ class CNMFRunner(object):
         run_params = load_df_from_npz(cnmf_obj.paths['nmf_replicate_parameters'])
         ks = sorted(set(run_params.n_components))
         for k in ks:
-            merged_spectra = load_df_from_npz(cnmf_obj.paths['merged_spectra']%k)
+            # merged_spectra = load_df_from_npz(cnmf_obj.paths['merged_spectra']%k)
             cnmf_obj.consensus(k, f'{density_threshold:.2f}', local_neighborhood_size, show_clustering)
         self.set_current_consensus(ks[0], density_threshold, local_neighborhood_size)
 
@@ -1021,7 +1073,7 @@ class CNMFRunner(object):
         usage.columns = ['Program_%s' % i for i in usage.columns]
         return usage
 
-    def program_genes(self):
+    def gene_scores(self):
         consensus = self.get_current_consensus()
         density_threshold_str = f'{consensus["density_threshold"]:.2f}'.replace('.', '_')
         filename = f'{self.name}.gene_spectra_score.k_{consensus["num_components"]}.dt_{density_threshold_str}.txt'
@@ -1030,19 +1082,101 @@ class CNMFRunner(object):
         programs.columns = ['Program_%s' % i for i in programs.columns]
         return programs
 
-    def insert_programs(self, adata, copy = True):
-        usage = self.program_usage()
-        activity_total = usage.sum(axis = 1)
-        genes = self.program_genes()
-        usage = usage.div(activity_total, axis = 0)
-        if copy:
-            adata = adata.copy()
+    def program_genes(self, source = 'tpm'):
+        consensus = self.get_current_consensus()
+        density_threshold_str = f'{consensus["density_threshold"]:.2f}'.replace('.', '_')
+        if source == 'tpm':
+            filename = f'{self.name}.gene_spectra_tpm.k_{consensus["num_components"]}.dt_{density_threshold_str}.txt'
+            # RNA_45.gene_spectra_tpm.k_45.dt_0_50
+        elif source == 'consensus':
+            filename = f'{self.name}.spectra.k_{consensus["num_components"]}.dt_{density_threshold_str}.consensus.txt'
+        else:
+            raise ValueError("source must be either 'tpm' or 'consensus'")
+        filepath = os.path.join(self.work_dir, self.name, filename)
+        programs = pd.read_csv(filepath, sep = '\t', index_col = 0)
+        return programs
 
-        adata.obs = pd.merge(left = adata.obs, right = usage, how='left', left_index=True, right_index=True)
-        adata.obs['activity_total'] = activity_total
-        adata.var = pd.merge(left = adata.var, right = genes, how='left', left_index=True, right_index=True)
-        adata.uns['programs'] = usage.columns
-        return adata
+    def compute_usages(self, adata : sc.AnnData, input_format = 'tpm', normalize = True):
+        X = adata.X
+        genes = adata.var.index.values
+        consensus = self.get_current_consensus()
+        cnmf_obj = self.get_cnmf()
+        refit_nmf_kwargs = yaml.load(open(cnmf_obj.paths['nmf_run_parameters']), Loader = yaml.FullLoader)
+        consensus_spectrum = self.program_genes(source = input_format)
+        if genes is not None:
+            consensus_spectrum = consensus_spectrum[genes]
+        else:
+            assert np.all(consensus_spectrum.columns == adata.var.index), 'The number of variables in adata must match the number in NMF'
+
+
+        H = consensus_spectrum.values.astype('float32')
+        refit_nmf_kwargs.update(dict(
+            n_components = consensus["num_components"],
+            H = H,
+            update_H = False
+        ))
+        log.info('Factorizing matrix ...')
+        _, rf_usages = cnmf_obj._nmf(X,
+                                 nmf_kwargs=refit_nmf_kwargs)
+        log.info('Done factorizing matrix!')
+        if normalize:
+            rf_usages = rf_usages / np.sum(rf_usages, axis = 1).reshape((-1, 1))
+        rf_usages = pd.DataFrame(rf_usages, index = adata.obs.index, columns = consensus_spectrum.index)
+        modality = adata.uns['modality'] + '_NMF'
+        return sc.AnnData(X = rf_usages, obs = adata.obs, uns = {'modality': modality})
+
+
+    def compute_batch_coefficients(self, df, var_columns, batch_column = 'batch'):
+        log.info('Computing batch coefficients...')
+        import statsmodels.formula.api as smf
+
+        df[batch_column] = pd.Categorical(df[batch_column])
+        batches = df[batch_column].values.categories
+        batch_coefficients = np.zeros((len(var_columns), batches.shape[0]))
+
+        for i, var in enumerate(var_columns):
+            mod = smf.glm(formula = f'{var} ~ {batch_column} - 1', data = df)
+            res = mod.fit()
+            batch_coefficients [i, :] = res.params
+
+        batch_coefficients = pd.DataFrame(data = batch_coefficients, columns = batches, index = var_columns)
+
+        return batch_coefficients
+
+    def extract_programs(self, adata, batch_column = None):
+        from IPython.display import display
+        # if copy:
+        #     adata = adata.copy()
+
+        genes = self.program_genes()
+        usage = self.program_usage()
+        assert (np.all(adata.obs.index == usage.index))
+        programs = usage.columns.values
+        batch_coeff = None
+
+        if batch_column is not None:
+            usage_batch = usage.join(adata.obs[[batch_column]], how = 'left')
+            batch_coeff = self.compute_batch_coefficients(usage_batch, var_columns = programs, batch_column = batch_column)
+            usage_batch = usage_batch.join(batch_coeff.T, how='left', on = batch_column, rsuffix = '_coeff')
+            for var_col in programs:
+                usage_batch[var_col] /= usage_batch[var_col + '_coeff']
+            usage = usage_batch[programs]
+
+        activity_total = usage.sum(axis = 1)
+        usage = usage.div(activity_total, axis = 0)
+        result = sc.AnnData(X = usage, obs = adata.obs)
+        if batch_coeff is not None:
+            result.varm['batch_coeff'] = batch_coeff
+        result.obs['activity_total'] = activity_total
+        result.uns['programs'] = programs
+        result.uns['modality'] = adata.uns['modality'] + '_NMF'
+
+        #
+        # adata.obs = pd.merge(left = adata.obs, right = usage, how='left', left_index=True, right_index=True)
+        # adata.obsm['programs'] = usage
+        # adata.var = pd.merge(left = adata.var, right = genes, how='left', left_index=True, right_index=True)
+        # adata.uns['programs'] = usage.columns.values
+        return result
 
     def top_genes(self, adata, n = 50):
         genes = []

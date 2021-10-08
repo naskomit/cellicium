@@ -126,7 +126,7 @@ RUN \
 
 # Temporary libraries to be moved up in the appropriate section
 RUN \
-  pip install scvi-tools scikit-misc fastcluster scikit-misc
+  pip install scvi-tools scikit-misc fastcluster scikit-misc jupytext
 
 # This must be the last set of pip commands (otherwise pip breaks)
 # If this is not done, scanpy.pp.pca does not work
