@@ -2,23 +2,69 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import os
-from IPython.display import display
+
 from cellicium.logging import logger as log
 import cellicium.scrna as crna
+from cellicium.utils import display
 import seaborn as sb
+import scipy.sparse as sparse
+from .base import ProblemDataset
+
+base_path_match_modality = '/home/jovyan/neurips/starter-kits/match-modality/output/datasets/match_modality'
 
 base_paths = {
- 'benchmark': '/home/jovyan/neurips/datasets/cite/'
+    'benchmark-cite': '/home/jovyan/neurips/datasets/cite/',
+    'benchmark-multiome': '/home/jovyan/neurips/datasets/cite/',
+    'openproblems_bmmc_cite_phase1_mod2' : base_path_match_modality,
+    'openproblems_bmmc_cite_phase1_rna': base_path_match_modality,
+    'openproblems_bmmc_multiome_phase1_mod2': base_path_match_modality,
+    'openproblems_bmmc_multiome_phase1_rna': base_path_match_modality
 }
 
-def load_data(name, batches = None):
-    if name == 'benchmark':
+def load_data(name, **kwargs) -> ProblemDataset:
+    if name == 'benchmark-multiome':
+        base_path = base_paths[name]
+        gex_path = os.path.join(base_path, 'multiome_gex_processed_training.h5ad')
+        atac_path = os.path.join(base_path, 'multiome_atac_processed_training.h5ad')
+        # log.info(os.path.abspath(gex_path))
+        log.info(f'Loading {gex_path}')
+        gex_data = sc.read_h5ad(gex_path)
+        log.info(f'Loading {atac_path}')
+        atac_data = sc.read_h5ad(atac_path)
+        # No total_counts is present in gex_data
+        gex_data.obs['total_counts'] = np.sum(gex_data.layers['counts'], axis = 1)
+        gex_data.obs['site'] = gex_data.obs['batch'].str.slice(0, 2)
+        gex_data.obs['donor'] = gex_data.obs['batch'].str.slice(2, 4)
+        atac_data.obs['site'] = atac_data.obs['batch'].str.slice(0, 2)
+        atac_data.obs['donor'] = atac_data.obs['batch'].str.slice(2, 4)
+
+        gex_data.uns['modality'] = 'GEX'
+        atac_data.uns['modality'] = 'atac'
+
+        train_selector = gex_data.obs['batch'].isin(['s3d6', 's2d1', 's2d4', 's1d1'])
+        test_selector = gex_data.obs['batch'].isin(['s1d2', 's3d7'])
+        n_train = np.sum(train_selector)
+        n_test = np.sum(test_selector)
+
+        result = ProblemDataset(
+            train_mod1 = gex_data[train_selector, :],
+            train_mod2 = atac_data[train_selector, :],
+            train_sol= sc.AnnData(X = sparse.diags(np.ones(n_train)).tocsr()),
+            test_mod1 = gex_data[test_selector, :],
+            test_mod2= atac_data[test_selector, :],
+            test_sol= sc.AnnData(X = sparse.diags(np.ones(n_test)).tocsr()),
+            modality1 = 'GEX',
+            modality2 = 'ATAC'
+        )
+    elif name == 'benchmark-cite':
         base_path = base_paths[name]
         gex_path = os.path.join(base_path, 'cite_gex_processed_training.h5ad')
-        adt_path = os.path.join(base_path, 'cite_adt_processed_training.h5ad')
+        atac_path = os.path.join(base_path, 'cite_adt_processed_training.h5ad')
         # log.info(os.path.abspath(gex_path))
+        log.info(f'Loading {gex_path}')
         gex_data = sc.read_h5ad(gex_path)
-        adt_data = sc.read_h5ad(adt_path)
+        log.info(f'Loading {atac_path}')
+        adt_data = sc.read_h5ad(atac_path)
         # No total_counts is present in gex_data
         gex_data.obs['total_counts'] = np.sum(gex_data.layers['counts'], axis = 1)
         gex_data.obs['site'] = gex_data.obs['batch'].str.slice(0, 2)
@@ -28,9 +74,83 @@ def load_data(name, batches = None):
 
         gex_data.uns['modality'] = 'GEX'
         adt_data.uns['modality'] = 'ADT'
-        return {'GEX': gex_data, 'ADT': adt_data}
+
+        train_selector = gex_data.obs['batch'].isin(['s3d6', 's2d1', 's2d4', 's1d1'])
+        test_selector = gex_data.obs['batch'].isin(['s1d2', 's3d7'])
+        n_train = np.sum(train_selector)
+        n_test = np.sum(test_selector)
+
+        result = ProblemDataset(
+            train_mod1 = gex_data[train_selector, :],
+            train_mod2 = adt_data[train_selector, :],
+            train_sol= sc.AnnData(X = sparse.diags(np.ones(n_train)).tocsr()),
+            test_mod1 = gex_data[test_selector, :],
+            test_mod2= adt_data[test_selector, :],
+            test_sol= sc.AnnData(X = sparse.diags(np.ones(n_test)).tocsr()),
+            modality1 = 'GEX',
+            modality2 = 'ADT'
+        )
+    elif name in {'openproblems_bmmc_cite_phase1_mod2', 'openproblems_bmmc_cite_phase1_rna', 'openproblems_bmmc_multiome_phase1_mod2', 'openproblems_bmmc_multiome_phase1_rna'}:
+        base_path = base_paths[name]
+        input_train_mod1 = sc.read_h5ad(os.path.join(base_path, f'{name}/{name}.censor_dataset.output_train_mod1.h5ad'))
+        input_train_mod2 = sc.read_h5ad(os.path.join(base_path, f'{name}/{name}.censor_dataset.output_train_mod2.h5ad'))
+        input_train_sol = sc.read_h5ad(os.path.join(base_path, f'{name}/{name}.censor_dataset.output_train_sol.h5ad'))
+        input_test_mod1 = sc.read_h5ad(os.path.join(base_path, f'{name}/{name}.censor_dataset.output_test_mod1.h5ad'))
+        input_test_mod2 = sc.read_h5ad(os.path.join(base_path, f'{name}/{name}.censor_dataset.output_test_mod2.h5ad'))
+        input_test_sol = sc.read_h5ad(os.path.join(base_path, f'{name}/{name}.censor_dataset.output_test_sol.h5ad'))
+        modality1 = input_train_mod1.var['feature_types'][0]
+        modality2 = input_train_mod2.var['feature_types'][0]
+
+        input_train_mod1.uns['modality'] = modality1
+        input_train_mod2.uns['modality'] = modality2
+        input_test_mod1.uns['modality'] = modality1
+        input_test_mod2.uns['modality'] = modality2
+
+        result = ProblemDataset(
+            train_mod1 = input_train_mod1,
+            train_mod2 = input_train_mod2,
+            train_sol= input_train_sol,
+            test_mod1 = input_test_mod1,
+            test_mod2= input_test_mod2,
+            test_sol= input_test_sol,
+            modality1 = modality1,
+            modality2 = modality2
+        )
+    elif name == 'run':
+        input_train_mod1 = sc.read_h5ad(kwargs['input_train_mod1'])
+        input_train_mod2 = sc.read_h5ad(kwargs['input_train_mod2'])
+        input_train_sol = sc.read_h5ad(kwargs['input_train_sol'])
+        input_test_mod1 = sc.read_h5ad(kwargs['input_test_mod1'])
+        input_test_mod2 = sc.read_h5ad(kwargs['input_test_mod2'])
+        modality1 = input_train_mod1.var['feature_types'][0]
+        modality2 = input_train_mod2.var['feature_types'][0]
+
+        input_train_mod1.uns['modality'] = modality1
+        input_train_mod2.uns['modality'] = modality2
+        input_test_mod1.uns['modality'] = modality1
+        input_test_mod2.uns['modality'] = modality2
+
+        result = ProblemDataset(
+            train_mod1 = input_train_mod1,
+            train_mod2 = input_train_mod2,
+            train_sol= input_train_sol,
+            test_mod1 = input_test_mod1,
+            test_mod2= input_test_mod2,
+            test_sol= None,
+            modality1 = modality1,
+            modality2 = modality2
+        )
+
+
     else:
-        raise ValueError(f'Unknown dataset {name}')
+        raise ValueError(f'Unknown dataset {name}, available data sets are: {base_paths.keys()}')
+
+    return result
+
+def load_nmf_spectra(spectra_file):
+    nmf_spectra = pd.read_csv(spectra_file, sep = '\t', index_col = 0)
+    nmf_spectra.index = nmf_spectra.index.map(str)
+    return nmf_spectra
 
 def datasets_info(adata_dict):
     rows = []
@@ -89,6 +209,3 @@ def select_batches(data, batches):
             result[k] = v[v.obs['batch'].isin(batches), :]
         return result
 
-
-def compare_nearest_neighbours(adata1 : sc.AnnData, adata2 : sc.AnnData):
-    pass

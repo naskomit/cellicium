@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import plotly.graph_objects as go
-from IPython.display import display
 import collections.abc as cabc
 
 def extract_columns(adata : sc.AnnData, col_list : list, axis, layers):

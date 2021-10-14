@@ -11,12 +11,16 @@ def get_or_create_axis(kwargs):
 
     return ax
 
-def text_plot(df : pd.DataFrame, x : str, y : str, **kwargs):
+def text_plot(df : pd.DataFrame, x : str, y : str , **kwargs):
     fontsize = kwargs.pop('fontsize', 8)
-
-    ax = get_or_create_axis(kwargs)
     x_vals = df[x]
     y_vals = df[y]
+
+    ax = get_or_create_axis(kwargs)
+    ax.set_xlim(-3, df.shape[0] + 3)
+    dy = np.max(y_vals) - np.min(y_vals)
+    ax.set_ylim(np.min(y_vals) - 0.2 * dy, np.max(y_vals) + 0.2 * dy)
+
     for i_val, val_name in enumerate(x_vals):
         ax.text(
             i_val,

@@ -4,18 +4,14 @@ import matplotlib.pyplot as plt
 import scanpy as sc
 import seaborn as sb
 import cellicium.scrna as crna
-import cellicium.cnmf as cnmf
 from cellicium.logging import logger as log
-import sklearn.neighbors as sknn
-import sklearn.preprocessing as skpp
 
-# from scipy.spatial import distance_matrix
-from IPython.display import display
 import pandas as pd
-import statsmodels.api as sm
-import statsmodels.formula.api as smf
 
 from . import preprocessing as pp
+from . import tools as tl
+from . import deepnmf as deepnmf
+from . import problems as prob
 
 from .siamese import SiamesseModel, SiameseModelManager
 
@@ -64,26 +60,10 @@ def compute_batch_coefficients(self, df, var_columns, batch_column = 'batch'):
         batch_coefficients [i, :] = res.params
 
     batch_coefficients = pd.DataFrame(data = batch_coefficients, columns = batches, index = var_columns)
-    display(batch_coefficients)
-
     return batch_coefficients
 
-def get_cnmf_runner(adata, workdir, name, num_components = 45, num_iterations = 100, run_analysis = False):
-    cnmf_runner = cnmf.CNMFRunner(workdir, name, num_workers = 6)
-    if run_analysis:
-        log.info('Saving count matrix')
-        adata_count = sc.AnnData(X = adata.layers['counts'], var = adata.var, obs = adata.obs)
-        log.info('Preparing ...')
-        cnmf_runner.prepare(adata_count, num_components = num_components, num_iterations = num_iterations)
-        log.info('Factorizing ...')
-        cnmf_runner.factorize()
-        log.info('Combining ...')
-        cnmf_runner.combine()
-        log.info('Creating consensus processes ...')
-        cnmf_runner.consensus(density_threshold = 0.5)
-    else:
-        cnmf_runner.set_current_consensus(num_components = num_components)
-    return cnmf_runner
+
+
 
 def plot_top_program_usage(adata, layer = None, n_top = 2):
     fg = crna.pl.figure_grid(ncol = n_top, nrow = 2)

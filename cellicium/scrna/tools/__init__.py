@@ -5,7 +5,7 @@ from .smoothing import bin_smooth, low_pass_filter
 
 
 def add_intron_data(adata, intron_data):
-  assert(adata.n_obs == intron_data.n_obs, "Number of observations must be the same for both exonic and intronic reads")
+  assert adata.n_obs == intron_data.n_obs, "Number of observations must be the same for both exonic and intronic reads"
   #exon_genes = exon
   intron_layer = np.zeros(adata.X.shape)
   for i, v in enumerate(adata.var.index):

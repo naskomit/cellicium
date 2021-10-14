@@ -459,7 +459,6 @@ class cNMF():
             #log.info("Logging stuff")
             _nmf_kwargs['random_state'] = p['nmf_seed']
             _nmf_kwargs['n_components'] = p['n_components']
-
             (spectra, usages) = self._nmf(norm_counts.X, _nmf_kwargs)
             spectra = pd.DataFrame(spectra,
                                    index=np.arange(1, _nmf_kwargs['n_components']+1),
@@ -467,7 +466,7 @@ class cNMF():
             save_df_to_npz(spectra, self.paths['iter_spectra'] % (p['n_components'], p['iter']))
 
 
-    def run_nmf_minibatch(self, worker_i=1, total_workers=1, minibatch_size = 5000):
+    def run_nmf_minibatch(self, worker_i = 1, total_workers = 1, minibatch_size = 5000):
         """
         Iteratively run NMF with prespecified parameters.
 
@@ -966,7 +965,12 @@ class cNMF():
 @cmproc.exception2either
 def factorize_worker(args):
     cnmf_obj = cNMF(output_dir = args['work_dir'], name = args['name'])
-    cnmf_obj.run_nmf_minibatch(worker_i = args['worker_id'], total_workers = args['num_workers'])
+    minibatch_size = args.pop('minibatch_size', None)
+    if minibatch_size:
+        cnmf_obj.run_nmf_minibatch(worker_i = args['worker_id'], total_workers = args['num_workers'],
+                                   minibatch_size = minibatch_size)
+    else:
+        cnmf_obj.run_nmf(worker_i = args['worker_id'], total_workers = args['num_workers'])
 
 # import time
     # print(f"Executing task {x}")
@@ -985,7 +989,8 @@ class CNMFRunner(object):
         cnmf_obj._initialize_dirs()
         return cnmf_obj
 
-    def prepare(self, adata, num_highly_variable_genes = 2000, num_components = 10, num_iterations = 20, random_seed = 42, beta_loss = 'frobenius', clean_dir = True):
+    def prepare(self, adata : sc.AnnData, use_counts = True, num_highly_variable_genes = 2000, num_components = 10, num_iterations = 20,
+                random_seed = 42, beta_loss = 'frobenius', clean_dir = False):
         if os.path.exists(self.work_dir):
             if clean_dir:
                 shutil.rmtree(self.work_dir)
@@ -994,9 +999,13 @@ class CNMFRunner(object):
             os.mkdir(self.work_dir)
 
         cnmf_obj = self.get_cnmf()
-        input_counts = adata.copy()
         sc.write(os.path.join(self.work_dir, self.name + '.h5ad'), adata)
-        tpm = compute_tpm(input_counts)
+        if use_counts:
+            input_counts = sc.AnnData(X = adata.layers['counts'], var = adata.var, obs = adata.obs)
+            tpm = compute_tpm(input_counts)
+        else:
+            input_counts = adata
+            tpm = adata
         sc.write(cnmf_obj.paths['tpm'], tpm)
 
         if sp.issparse(tpm.X):
@@ -1019,9 +1028,12 @@ class CNMFRunner(object):
             ks = num_components, n_iter = num_iterations, random_state_seed = random_seed, beta_loss = beta_loss)
         cnmf_obj.save_nmf_iter_params(replicate_params, run_params)
 
-    def factorize(self):
+    def factorize(self, minibatch_size = None):
         runner = cmproc.MPRunner(factorize_worker, num_workers = self.num_workers)
-        worker_args = [{'name': self.name, 'work_dir': self.work_dir, 'worker_id': i, 'num_workers': self.num_workers} for i in range(self.num_workers)]
+        worker_args = [{'name': self.name, 'work_dir': self.work_dir,
+                        'worker_id': i, 'num_workers': self.num_workers,
+                        'minibatch_size': minibatch_size}
+                       for i in range(self.num_workers)]
         runner.apply(worker_args)
         print("Factorization completed successfully")
         # cnmf_obj = self.get_cnmf()
@@ -1108,7 +1120,6 @@ class CNMFRunner(object):
         else:
             assert np.all(consensus_spectrum.columns == adata.var.index), 'The number of variables in adata must match the number in NMF'
 
-
         H = consensus_spectrum.values.astype('float32')
         refit_nmf_kwargs.update(dict(
             n_components = consensus["num_components"],
@@ -1116,8 +1127,7 @@ class CNMFRunner(object):
             update_H = False
         ))
         log.info('Factorizing matrix ...')
-        _, rf_usages = cnmf_obj._nmf(X,
-                                 nmf_kwargs=refit_nmf_kwargs)
+        _, rf_usages = cnmf_obj._nmf(X, nmf_kwargs = refit_nmf_kwargs)
         log.info('Done factorizing matrix!')
         if normalize:
             rf_usages = rf_usages / np.sum(rf_usages, axis = 1).reshape((-1, 1))

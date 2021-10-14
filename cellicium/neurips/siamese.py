@@ -6,10 +6,10 @@ import tensorflow.keras as tfk
 import scipy.sparse as sparse
 import numba as nmb
 import typing as tp
-import matplotlib as mpl
 import matplotlib.pyplot as plt
-from IPython.display import display
-import ipywidgets as widgets
+import os
+import glob
+from cellicium.utils import display
 import cellicium.scrna as crna
 from cellicium.logging import logger as log
 
@@ -30,17 +30,22 @@ class DoubleTripletDistanceLayer(tfk.layers.Layer):
 
     def call(self, input, *args, **kwargs):
         ((anchor_z1, positive_z1, negative_z1), (anchor_z2, positive_z2, negative_z2)) = input
-        loss_corr = self.distance_2(anchor_z1, anchor_z2) + self.distance_2(positive_z1, positive_z2) + self.distance_2(negative_z1, negative_z2)
-        loss_corr *= self.correspondance_coeff
+        loss_corresp = self.distance_2(anchor_z1, anchor_z2) + self.distance_2(positive_z1, positive_z2) + self.distance_2(negative_z1, negative_z2)
 
         ap_distance = self.distance_2(anchor_z1, positive_z1)
         an_distance = self.distance_2(anchor_z1, negative_z1)
         # Computing the Triplet Loss by subtracting both distances and
         # making sure we don't get a negative value.
-        loss_pn = ap_distance - an_distance
-        loss_pn = tf.maximum(loss_pn + self.margin, 0.0)
+        loss_pos_neg = ap_distance - an_distance
+        loss_pos_neg = tf.maximum(loss_pos_neg + self.margin, 0.0)
 
-        return loss_corr + loss_pn
+        return {'loss_corresp': loss_corresp, 'loss_pos_neg': loss_pos_neg}
+
+    def total_loss(self, losses):
+        # The output of the network is the loss
+        # loss = self.network(data)
+        loss = losses['loss_corresp'] * self.correspondance_coeff + losses['loss_pos_neg']
+        return loss
 
 class SiamesseModel(tfk.Model):
     def __init__(self, dim_in1, dim_in2, dim_z = 20, margin = 1.0, correspondance_coeff = 0.01, verbose = False):
@@ -51,28 +56,66 @@ class SiamesseModel(tfk.Model):
         self.margin = margin
         self.correspondance_coeff = correspondance_coeff
         self.model1, self.model2, self.network = self.build_models()
-        self.loss_tracker = tfk.metrics.Mean(name = "loss")
+        self.loss_trackers = {
+            'loss_corresp': tfk.metrics.Mean(name = "loss_corresp"),
+            'loss_pos_neg': tfk.metrics.Mean(name = "loss_pos_neg"),
+            'loss_total': tfk.metrics.Mean(name = "loss_total")
+        }
         self.verbose = verbose
         if self.verbose:
             self.network.summary()
 
-    def build_models(self) -> tp.Tuple[tfk.Model, tfk.Model, tfk.Model]:
-        dropout_rate = 0.2
-        input1 = tfk.Input(self.dim_in1, name = 'mod1 input')
-        x1 = input1
-        # x1 = tfk.layers.Dense(self.dim_z, activation = 'ReLU')(x1)
-        # x1 = tfk.layers.Dropout(dropout_rate)(x1)
-        x1 = tfk.layers.Dense(self.dim_z)(x1)
-        z1 = tfk.layers.Dropout(dropout_rate)(x1)
-        model1 = tfk.Model(input1, z1)
+    def lin_log_layer(self, input, log_offset, shape = None):
+        if shape is None:
+            shape = input.shape[-1]
+        x_lin = tfk.layers.Dense(shape)(input)
+        x_log = tfk.layers.Lambda(lambda x: tf.math.log(x + log_offset))(input)
+        x_log = tfk.layers.Dense(shape)(x_log)
+        x_log = tfk.layers.Lambda(tf.math.exp)(x_log)
+        x = tf.keras.layers.Add()([x_lin, x_log])
+        return x
 
+    def assemble_encoder(self, input, dropout_rate = 0.3, log_offset = 0.1):
+        x = self.lin_log_layer(input, log_offset, shape = self.dim_z)
+        x = tfk.layers.BatchNormalization()(x)
+        # x = tfk.layers.ReLU()(x)
+        z = tfk.layers.Dropout(dropout_rate)(x)
+
+        # x = self.lin_log_layer(x, log_offset)
+        # x = tfk.layers.BatchNormalization()(x)
+        # x = tfk.layers.ReLU()(x)
+        # x = tfk.layers.Dropout(dropout_rate)(x)
+
+        # x = tfk.layers.Dense(self.dim_z)(x)
+        # x = tfk.layers.BatchNormalization()(x)
+        # x = tfk.layers.ReLU()(x)
+        # x = tfk.layers.Dropout(dropout_rate)(x)
+
+        # x = tfk.layers.Dense(self.dim_z)(x)
+        # x = tfk.layers.BatchNormalization()(x)
+        # z = tfk.layers.Dropout(dropout_rate)(x)
+        model = tfk.Model(input, z)
+        return model
+
+
+    def build_models(self) -> tp.Tuple[tfk.Model, tfk.Model, tfk.Model]:
+        input1 = tfk.Input(self.dim_in1, name = 'mod1 input')
+        model1 = self.assemble_encoder(input1)
+        # x1 = input1
+        # x1 = self.lin_log_layer(x1, self.dim_in1)
+        # x1 = tfk.layers.Dropout(dropout_rate)(x1)
+        # x1 = tfk.layers.Dense(self.dim_z)(x1)
+        # z1 = tfk.layers.Dropout(dropout_rate)(x1)
+        # model1 = tfk.Model(input1, z1)
+        #
         input2 = tfk.Input(self.dim_in2, name = 'mod2 input')
-        x2 = input2
-        # x2 = tfk.layers.Dense(self.dim_z, activation = 'ReLU')(x2)
+        model2 = self.assemble_encoder(input2)
+        # x2 = input2
+        # x2 = self.lin_log_layer(x2, self.dim_in2)
         # x2 = tfk.layers.Dropout(dropout_rate)(x2)
-        x2 = tfk.layers.Dense(self.dim_z)(x2)
-        z2 = tfk.layers.Dropout(dropout_rate)(x2)
-        model2 = tfk.Model(input2, z2)
+        # x2 = tfk.layers.Dense(self.dim_z)(x2)
+        # z2 = tfk.layers.Dropout(dropout_rate)(x2)
+        # model2 = tfk.Model(input2, z2)
 
         anchor_index = tfk.Input(name = 'anchor_index', shape = 1)
         anchor_input_mod1 = tfk.Input(name = 'anchor_mod1', shape = self.dim_in1)
@@ -90,18 +133,17 @@ class SiamesseModel(tfk.Model):
         positive_z2 = model2(positive_input_mod2)
         negative_z2 = model2(negative_input_mod2)
 
-        distances = DoubleTripletDistanceLayer(self.correspondance_coeff, self.margin)(
-            ((anchor_z1, positive_z1, negative_z1), (anchor_z2, positive_z2, negative_z2))
-        )
+        # Add a layer computing the losses
+        self.error_layer = DoubleTripletDistanceLayer(self.correspondance_coeff, self.margin)
+        model_error = self.error_layer(((anchor_z1, positive_z1, negative_z1), (anchor_z2, positive_z2, negative_z2)))
 
         network = tfk.Model(inputs = [anchor_index, anchor_input_mod1, positive_input_mod1, negative_input_mod1, anchor_input_mod2, positive_input_mod2, negative_input_mod2],
-                            outputs = distances, name = 'SiameseModelNetwork')
+                            outputs = model_error, name = 'SiameseModelNetwork')
 
         return model1, model2, network
 
     def call(self, inputs, *args, **kwargs):
         return self.network(inputs)
-
 
     def train_step(self, data):
         # GradientTape is a context manager that records every operation that
@@ -109,11 +151,12 @@ class SiamesseModel(tfk.Model):
         # the gradients and apply them using the optimizer specified in
         # `compile()`.
         with tf.GradientTape() as tape:
-            loss = self._compute_loss(data)
-
+            losses = self.network(data)
+            loss_total = self.error_layer.total_loss(losses)
+        losses['loss_total'] = loss_total
         # Storing the gradients of the loss function with respect to the
         # weights/parameters.
-        gradients = tape.gradient(loss, self.network.trainable_weights)
+        gradients = tape.gradient(loss_total, self.network.trainable_weights)
 
         # Applying the gradients on the model using the specified optimizer
         self.optimizer.apply_gradients(
@@ -121,48 +164,55 @@ class SiamesseModel(tfk.Model):
         )
 
         # Let's update and return the training loss metric.
-        self.loss_tracker.update_state(loss)
-        return {"loss": self.loss_tracker.result()}
+        for k, v in self.loss_trackers.items():
+            v.update_state(losses[k])
+        return {k: v.result() for k, v in self.loss_trackers.items()}
 
     def test_step(self, data):
-        loss = self._compute_loss(data)
+        losses = self.network(data)
+        loss_total = self.error_layer.total_loss(losses)
+        losses['loss_total'] = loss_total
         # Let's update and return the loss metric.
-        self.loss_tracker.update_state(loss)
-        return {"loss": self.loss_tracker.result()}
-
-    def _compute_loss(self, data):
-        # The output of the network is the loss
-        loss = self.network(data)
-        return loss
+        for k, v in self.loss_trackers.items():
+            v.update_state(losses[k])
+        return {k: v.result() for k, v in self.loss_trackers.items()}
 
     @property
     def metrics(self):
         # We need to list our metrics here so the `reset_states()` can be
         # called automatically.
-        return [self.loss_tracker]
+        return [v for k, v in self.loss_trackers.items()]
 
 class EpochProgressCallback(tfk.callbacks.Callback):
     def __init__(self, total_num_epochs : int):
         from tqdm.notebook import tqdm
         super().__init__()
         self.total_num_epochs = total_num_epochs
-        # Outputs
-        progress_bar_out = widgets.Output(layout = {'width': '600px', 'height': '50px'})
-        self.metrics_out = widgets.Output(layout = {'width': '600px', 'height': '100px'})
-        self.fig_out = widgets.Output(layout = {'margin': '50px 0px 50px 50px'})
+        self.interactive = False
+        try:
+            import ipywidgets as widgets
+            self.interactive = True
+            # Outputs
+            progress_bar_out = widgets.Output(layout = {'width': '600px', 'height': '50px'})
+            self.metrics_out = widgets.Output(layout = {'width': '600px', 'height': '100px'})
+            self.fig_out = widgets.Output(layout = {'margin': '50px 0px 50px 50px'})
 
-        # self.stop_button = widgets.Button(description = "Stop training")
-        # def on_stop_button(instance):
-        #     with self.metrics_out:
-        #         print('Stopping ....')
-        #         self.model.stop_training = True
-        #         raise ValueError("Stopped...")
-        # self.stop_button.on_click(on_stop_button)
+            # self.stop_button = widgets.Button(description = "Stop training")
+            # def on_stop_button(instance):
+            #     with self.metrics_out:
+            #         print('Stopping ....')
+            #         self.model.stop_training = True
+            #         raise ValueError("Stopped...")
+            # self.stop_button.on_click(on_stop_button)
 
-        training_output = widgets.HBox([widgets.VBox([progress_bar_out, self.metrics_out]), self.fig_out], layout={'border': '1px solid black', 'height': '300px'})
-        display(training_output)
-        with progress_bar_out:
-            self.pbar = tqdm(total = total_num_epochs)
+            training_output = widgets.HBox([widgets.VBox([progress_bar_out, self.metrics_out]), self.fig_out],
+                                           layout={'border': '1px solid black', 'height': '300px'})
+            display(training_output)
+
+            with progress_bar_out:
+                self.pbar = tqdm(total = total_num_epochs)
+        except ModuleNotFoundError:
+            pass
         # self.fig = plt.figure()
         self.metrics = {}
         self.first_run_completed = False
@@ -180,33 +230,36 @@ class EpochProgressCallback(tfk.callbacks.Callback):
             display(fig)
 
     def on_epoch_end(self, epoch, logs = None):
-        self.pbar.update(1)
+        if self.interactive:
+            self.pbar.update(1)
 
-        if not self.first_run_completed:
+            if not self.first_run_completed:
+                for k, v, in logs.items():
+                    self.metrics[k] = []
+
             for k, v, in logs.items():
-                self.metrics[k] = []
+                self.metrics[k].append(v)
+                self.metrics_out.clear_output()
+                with self.metrics_out:
+                    print(f'Epoch {epoch}')
+                    print(logs)
 
-        for k, v, in logs.items():
-            self.metrics[k].append(v)
-            self.metrics_out.clear_output()
-            with self.metrics_out:
-                print(logs)
-
-        if self.first_run_completed and (epoch % 20 == 0):
-            self.plot_metrics()
+            if self.first_run_completed and (epoch % 20 == 0):
+                self.plot_metrics()
 
         self.first_run_completed = True
 
     def on_train_end(self, logs=None):
-        self.pbar.close()
-        self.plot_metrics()
-        plt.close()
+        if self.interactive:
+            self.pbar.close()
+            self.plot_metrics()
+            plt.close()
 
 class SiameseModelManager:
-    def __init__(self, dim_z : int = 20, margin : float = 1.0, correspondance_coeff : float = 0.01, seed : int = 1234, verbose : bool = False):
+    def __init__(self, dim_z : int = 20, seed : int = 1234, verbose : bool = False):
         self.dim_z = dim_z
-        self.margin = margin
-        self.correspondance_coeff = correspondance_coeff
+        # self.margin = margin
+        # self.correspondance_coeff = correspondance_coeff
         self.seed = seed
         self.verbose = verbose
         self.model = None
@@ -214,12 +267,33 @@ class SiameseModelManager:
         self.progress_tracker = None
         self.train_dataset = None
         self.val_dataset = None
+        self.modality_encoders = None
 
-    def train(self, adata1 : sc.AnnData, adata2 : sc.AnnData, dataset_gen, gen_kwargs = None, lr = 0.0001, epochs = 100):
+    def save_encoders(self, dir):
+        if not os.path.exists(dir):
+            os.mkdir(dir)
+        for k,v in self.modality_encoders.items():
+            v.save_weights(os.path.join(dir, f'{k}.h5'), save_format = 'hdf5')
+
+    def load_encoders(self, dir, dims_dict):
+        modalities = list(dims_dict.keys())
+        if self.model is None:
+            self.model = SiamesseModel(
+                dim_in1 = dims_dict[modalities[0]], dim_in2 = dims_dict[modalities[1]], dim_z = self.dim_z)
+        self.modality_encoders = {}
+        for modality, model in zip(modalities, [self.model.model1, self.model.model2]):
+            self.modality_encoders[modality] = model
+            filepath = os.path.join(dir, modality + '.h5')
+            model.load_weights(filepath)
+            log.info(f'Loaded encoder for {modality} from {filepath}')
+
+    def train(self, adata1 : sc.AnnData, adata2 : sc.AnnData, dataset_gen, gen_kwargs = None,
+              lr :float = 0.0001, epochs :int = 100, minibatch_size :int = 256,
+              margin : float = 1.0, correspondance_coeff : float = 0.1):
         if self.model is None:
             self.model = SiamesseModel(
                 dim_in1 = adata1.n_vars, dim_in2 = adata2.n_vars, dim_z = self.dim_z,
-                margin = self.margin, correspondance_coeff = self.correspondance_coeff, verbose = self.verbose)
+                margin = margin, correspondance_coeff = correspondance_coeff, verbose = self.verbose)
             self.modality_encoders = {adata1.uns['modality'] : self.model.model1, adata2.uns['modality'] : self.model.model2}
         tf.random.set_seed(self.seed)
 
@@ -231,8 +305,8 @@ class SiameseModelManager:
         self.train_dataset = dataset.take(round(n_data_points * 0.8))
         self.val_dataset = dataset.skip(round(n_data_points * 0.8))
 
-        self.train_dataset = self.train_dataset.batch(256, drop_remainder=False)
-        self.val_dataset = self.val_dataset.batch(256, drop_remainder=False)
+        self.train_dataset = self.train_dataset.batch(minibatch_size, drop_remainder=False)
+        self.val_dataset = self.val_dataset.batch(minibatch_size, drop_remainder=False)
 
         self.progress_tracker = EpochProgressCallback(epochs)
         self.model.compile(optimizer = tfk.optimizers.Adam(lr)) # , run_eagerly = True
@@ -253,36 +327,75 @@ class SiameseModelManager:
         for k,v in training_log.history.items():
             self.history[k] += v
 
-    def latent_representation(self, adata_list : tp.List[sc.AnnData]):
+    def find_encoder(self, modality):
+        if modality in self.modality_encoders:
+            return self.modality_encoders[modality]
+        else:
+            raise ValueError(f'No encoder found for modality {modality}')
+
+    # def latent_representation(self, adata_list : tp.List[sc.AnnData]):
+    #     Z_list = []
+    #     obs_list = []
+    #     for adata in adata_list:
+    #         X = adata.X.todense() if sparse.issparse(adata.X) else adata.X
+    #         modality = adata.uns['modality']
+    #         Z_predict = self.find_encoder(modality).predict(X)
+    #         Z_list.append(Z_predict)
+    #         obs = adata.obs[['cell_type', 'batch', 'site', 'donor']].copy()
+    #         obs['modality'] = modality
+    #         obs.index = obs.index + ('_' + modality)
+    #         obs_list.append(obs)
+    #
+    #     result = sc.AnnData(X = np.vstack(Z_list), obs = pd.concat(obs_list))
+    #     return result
+
+    def transform_to_common_space(self, adata_list : tp.List[sc.AnnData], unify = False, obs_fields = None):
         Z_list = []
-        obs_list = []
         for adata in adata_list:
             X = adata.X.todense() if sparse.issparse(adata.X) else adata.X
             modality = adata.uns['modality']
-            Z_predict = self.modality_encoders[modality].predict(X)
+            Z_predict = self.find_encoder(modality).predict(X)
             Z_list.append(Z_predict)
-            obs = adata.obs[['cell_type', 'batch', 'site', 'donor']].copy()
-            obs['modality'] = modality
-            obs.index = obs.index + ('_' + modality)
-            obs_list.append(obs)
 
-        result = sc.AnnData(X = np.vstack(Z_list), obs = pd.concat(obs_list))
+        if unify:
+            obs_list = []
+            for adata in adata_list:
+                modality = adata.uns['modality']
+                if obs_fields:
+                    obs = adata.obs[obs_fields].copy()
+                else:
+                    obs = pd.DataFrame({}, index = adata.obs.index)
+                obs['modality'] = modality
+                obs.index = obs.index + ('_' + modality)
+                obs_list.append(obs)
+            result = sc.AnnData(X = np.vstack(Z_list), obs = pd.concat(obs_list))
+        else:
+            result = []
+            for i, adata in enumerate(adata_list):
+                modality = adata.uns['modality']
+                result.append(sc.AnnData(X = Z_list[i], obs = adata.obs,
+                                         uns = {'modality': modality}))
+
         return result
 
-    def plot_integration_umap(self, adata_list : tp.List[sc.AnnData]):
-        adata = self.latent_representation(adata_list)
+    def plot_integration_umap(self, adata_list : tp.List[sc.AnnData], color = None, obs_fields = None):
+        adata = self.transform_to_common_space(adata_list, unify = True, obs_fields = obs_fields)
         sc.pp.neighbors(adata)
         sc.tl.umap(adata)
         fg = crna.pl.figure_grid(ncol = 2, nrow = 1, figsize = (40, 20))
-        sc.pl.umap(adata, color = 'modality', ax = next(fg), s = 20, show = False)
-        sc.pl.umap(adata, color = 'cell_type', ax = next(fg), s = 20, show = False, legend_loc = 'on data')
+        if color is None:
+            color = ['modality']
+        if 'modality' in color:
+            sc.pl.umap(adata, color = 'modality', ax = next(fg), s = 20, show = False)
+        if 'cell_type' in color:
+            sc.pl.umap(adata, color = 'cell_type', ax = next(fg), s = 20, show = False, legend_loc = 'on data')
         return adata
 
-    def compute_match(self, adata1 : sc.AnnData, adata2 : sc.AnnData):
-        # val_ind = np.array([i[0].numpy() for i in self.val_dataset.unbatch()])
-        # adata1 = adata1[val_ind, ]
-        z1 = self.latent_representation([adata1])
-        z2 = self.latent_representation([adata2])
+    # def compute_match(self, adata1 : sc.AnnData, adata2 : sc.AnnData):
+    #     # val_ind = np.array([i[0].numpy() for i in self.val_dataset.unbatch()])
+    #     # adata1 = adata1[val_ind, ]
+    #     z1 = self.latent_representation([adata1])
+    #     z2 = self.latent_representation([adata2])
 
 
     def create_triplets_dataset_by_group(self, adata1 : sc.AnnData, adata2 : sc.AnnData, group_column):
