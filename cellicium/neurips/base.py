@@ -1,5 +1,6 @@
 import collections as coll
 import scanpy as sc
+import numpy as np
 
 ProblemDatasetBase = coll.namedtuple(
     'ProblemDataset', [
@@ -36,12 +37,20 @@ class ProblemDataset(ProblemDatasetBase):
         result.uns['modality'] = self.modality2
         return result
 
-    def get_data(self, group, modality):
+    def _get_data(self, group, modality, sort = False):
         if modality == self.modality1:
             if group == 'train':
-                return self.train_mod1
+                if sort:
+                    order = np.argsort(self.train_sol.X.nonzero()[1])
+                    return self.train_mod1[order, :]
+                else:
+                    return self.train_mod1
             elif group == 'test':
-                return self.test_mod1
+                if sort:
+                    order = np.argsort(self.test_sol.X.nonzero()[1])
+                    return self.test_mod1[order, :]
+                else:
+                    return self.test_mod1
             else:
                 raise ValueError(f'Group must be train or test, not {group}')
         elif modality == self.modality2:

@@ -32,3 +32,6 @@ oath2/up:
 
 neurips/sync:
 	aws s3 sync NeurIPS s3://cellicium/NeurIPS --profile cellicium
+
+neurips/build:
+	docker build -t openproblemsbio-cellicium:latest build/openproblemsbio

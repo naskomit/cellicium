@@ -398,6 +398,7 @@ class SiameseModelManager:
     #     z2 = self.latent_representation([adata2])
 
 
+
     def create_triplets_dataset_by_group(self, adata1 : sc.AnnData, adata2 : sc.AnnData, group_column):
         n_obs = adata1.n_obs
         groups = adata1.obs[[group_column]].reset_index().groupby(group_column).groups

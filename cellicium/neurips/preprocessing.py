@@ -22,6 +22,7 @@ base_paths = {
 }
 
 def load_data(name, **kwargs) -> ProblemDataset:
+    rng = np.random.default_rng(seed = 42)
     if name == 'benchmark-multiome':
         base_path = base_paths[name]
         gex_path = os.path.join(base_path, 'multiome_gex_processed_training.h5ad')
@@ -46,13 +47,16 @@ def load_data(name, **kwargs) -> ProblemDataset:
         n_train = np.sum(train_selector)
         n_test = np.sum(test_selector)
 
+        train_mix = rng.choice(n_train, size = n_train, replace = False)
+        test_mix = rng.choice(n_test, size = n_test, replace = False)
+
         result = ProblemDataset(
-            train_mod1 = gex_data[train_selector, :],
+            train_mod1 = gex_data[train_selector, :][train_mix, :],
             train_mod2 = atac_data[train_selector, :],
-            train_sol= sc.AnnData(X = sparse.diags(np.ones(n_train)).tocsr()),
-            test_mod1 = gex_data[test_selector, :],
+            train_sol= sc.AnnData(X = sparse.diags(np.ones(n_train)).tocsr())[train_mix, :],
+            test_mod1 = gex_data[test_selector, :][test_mix, :],
             test_mod2= atac_data[test_selector, :],
-            test_sol= sc.AnnData(X = sparse.diags(np.ones(n_test)).tocsr()),
+            test_sol= sc.AnnData(X = sparse.diags(np.ones(n_test)).tocsr())[test_mix, :],
             modality1 = 'GEX',
             modality2 = 'ATAC'
         )
@@ -80,13 +84,16 @@ def load_data(name, **kwargs) -> ProblemDataset:
         n_train = np.sum(train_selector)
         n_test = np.sum(test_selector)
 
+        train_mix = rng.choice(n_train, size = n_train, replace = False)
+        test_mix = rng.choice(n_test, size = n_test, replace = False)
+
         result = ProblemDataset(
-            train_mod1 = gex_data[train_selector, :],
+            train_mod1 = gex_data[train_selector, :][train_mix, :],
             train_mod2 = adt_data[train_selector, :],
-            train_sol= sc.AnnData(X = sparse.diags(np.ones(n_train)).tocsr()),
-            test_mod1 = gex_data[test_selector, :],
+            train_sol= sc.AnnData(X = sparse.diags(np.ones(n_train)).tocsr())[train_mix, :],
+            test_mod1 = gex_data[test_selector, :][test_mix, :],
             test_mod2= adt_data[test_selector, :],
-            test_sol= sc.AnnData(X = sparse.diags(np.ones(n_test)).tocsr()),
+            test_sol= sc.AnnData(X = sparse.diags(np.ones(n_test)).tocsr())[test_mix, :],
             modality1 = 'GEX',
             modality2 = 'ADT'
         )

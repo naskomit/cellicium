@@ -8,12 +8,13 @@ services:
       dockerfile: Dockerfile
       args:
         BASE_IMAGE: jupyter/scipy-notebook:8d32a5208ca1
-    ports:
-      - 8888-8892:8888-8892
-      - 6006:6006
+#    ports:
+#      - 8888-8892:8888-8892
+#      - 6006:6006
     # command:
     #   - sleep
     #   - "infinity"
+    network_mode: "host"
     environment:
       JUPYTER_ENABLE_LAB: "yes"
       PYTHONPATH: "/home/jovyan/pylibs"

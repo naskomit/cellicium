@@ -131,6 +131,7 @@ RUN \
 # This must be the last set of pip commands (otherwise pip breaks)
 # If this is not done, scanpy.pp.pca does not work
 RUN \
+  pip install pydevd-pycharm~=191.7479.19 && \
   pip uninstall -y numba && \
   pip install numba==0.52.* --ignore-installed
 
