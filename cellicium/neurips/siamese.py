@@ -30,16 +30,17 @@ class DoubleTripletDistanceLayer(tfk.layers.Layer):
 
     def call(self, input, *args, **kwargs):
         ((anchor_z1, positive_z1, negative_z1), (anchor_z2, positive_z2, negative_z2)) = input
-        loss_corresp = self.distance_2(anchor_z1, anchor_z2) + self.distance_2(positive_z1, positive_z2) + self.distance_2(negative_z1, negative_z2)
+        loss_corresp = (self.distance_2(anchor_z1, anchor_z2) +
+                        self.distance_2(positive_z1, positive_z2) +
+                        self.distance_2(negative_z1, negative_z2))
 
         ap_distance = self.distance_2(anchor_z1, positive_z1)
         an_distance = self.distance_2(anchor_z1, negative_z1)
         # Computing the Triplet Loss by subtracting both distances and
         # making sure we don't get a negative value.
-        loss_pos_neg = ap_distance - an_distance
-        loss_pos_neg = tf.maximum(loss_pos_neg + self.margin, 0.0)
+        loss_pos_neg = tf.maximum(ap_distance - an_distance + self.margin, 0.0)
 
-        return {'loss_corresp': loss_corresp, 'loss_pos_neg': loss_pos_neg}
+        return {'loss_corresp': tf.reduce_mean(loss_corresp), 'loss_pos_neg': tf.reduce_mean(loss_pos_neg)}
 
     def total_loss(self, losses):
         # The output of the network is the loss
@@ -60,38 +61,43 @@ class SiamesseModel(tfk.Model):
             'loss_corresp': tfk.metrics.Mean(name = "loss_corresp"),
             'loss_pos_neg': tfk.metrics.Mean(name = "loss_pos_neg"),
             'loss_total': tfk.metrics.Mean(name = "loss_total")
+            # 'loss_l1_l2': tfk.metrics.Mean(name = "loss_l1_l2")
         }
         self.verbose = verbose
         if self.verbose:
             self.network.summary()
 
-    def lin_log_layer(self, input, log_offset, shape = None):
+    def lin_log_layer(self, input, log_offset, shape = None, l1_reg = 0.0, l2_reg = 0.0):
         if shape is None:
             shape = input.shape[-1]
+        #, kernel_regularizer = tfk.regularizers.l1_l2(l1_reg, l2_reg)
         x_lin = tfk.layers.Dense(shape)(input)
         x_log = tfk.layers.Lambda(lambda x: tf.math.log(x + log_offset))(input)
+        # , kernel_regularizer = tfk.regularizers.l1_l2(l1_reg, l2_reg)
         x_log = tfk.layers.Dense(shape)(x_log)
-        x_log = tfk.layers.Lambda(tf.math.exp)(x_log)
+        # x_log = tfk.layers.Lambda(tf.math.exp)(x_log)
         x = tf.keras.layers.Add()([x_lin, x_log])
         return x
 
-    def assemble_encoder(self, input, dropout_rate = 0.3, log_offset = 0.1):
-        x = self.lin_log_layer(input, log_offset, shape = self.dim_z)
+    def assemble_encoder(self, input, dropout_rate = 0.3, log_offset = 0.1, l1_reg = 0.000, l2_reg = 0.000):
+
+        x = self.lin_log_layer(input, log_offset, shape = self.dim_z, l1_reg = l1_reg, l2_reg = l2_reg)
         x = tfk.layers.BatchNormalization()(x)
         # x = tfk.layers.ReLU()(x)
+        # x = tfk.layers.Dropout(dropout_rate)(x)
+        #
+        # x = self.lin_log_layer(x, log_offset, shape = self.dim_z, l1_reg = l1_reg, l2_reg = l2_reg)
+        # x = tfk.layers.BatchNormalization()(x)
+        # # x = tfk.layers.ReLU()(x)
+
         z = tfk.layers.Dropout(dropout_rate)(x)
-
-        # x = self.lin_log_layer(x, log_offset)
+        #
+        # x = tfk.layers.Dense(units = input.shape[-1], kernel_regularizer = tfk.regularizers.l1_l2(l1_reg, l2_reg))(x)
         # x = tfk.layers.BatchNormalization()(x)
         # x = tfk.layers.ReLU()(x)
         # x = tfk.layers.Dropout(dropout_rate)(x)
-
-        # x = tfk.layers.Dense(self.dim_z)(x)
-        # x = tfk.layers.BatchNormalization()(x)
-        # x = tfk.layers.ReLU()(x)
-        # x = tfk.layers.Dropout(dropout_rate)(x)
-
-        # x = tfk.layers.Dense(self.dim_z)(x)
+        #
+        # x = tfk.layers.Dense(units = self.dim_z, kernel_regularizer = tfk.regularizers.l1_l2(l1_reg, l2_reg))(x)
         # x = tfk.layers.BatchNormalization()(x)
         # z = tfk.layers.Dropout(dropout_rate)(x)
         model = tfk.Model(input, z)
@@ -101,21 +107,9 @@ class SiamesseModel(tfk.Model):
     def build_models(self) -> tp.Tuple[tfk.Model, tfk.Model, tfk.Model]:
         input1 = tfk.Input(self.dim_in1, name = 'mod1 input')
         model1 = self.assemble_encoder(input1)
-        # x1 = input1
-        # x1 = self.lin_log_layer(x1, self.dim_in1)
-        # x1 = tfk.layers.Dropout(dropout_rate)(x1)
-        # x1 = tfk.layers.Dense(self.dim_z)(x1)
-        # z1 = tfk.layers.Dropout(dropout_rate)(x1)
-        # model1 = tfk.Model(input1, z1)
-        #
+
         input2 = tfk.Input(self.dim_in2, name = 'mod2 input')
         model2 = self.assemble_encoder(input2)
-        # x2 = input2
-        # x2 = self.lin_log_layer(x2, self.dim_in2)
-        # x2 = tfk.layers.Dropout(dropout_rate)(x2)
-        # x2 = tfk.layers.Dense(self.dim_z)(x2)
-        # z2 = tfk.layers.Dropout(dropout_rate)(x2)
-        # model2 = tfk.Model(input2, z2)
 
         anchor_index = tfk.Input(name = 'anchor_index', shape = 1)
         anchor_input_mod1 = tfk.Input(name = 'anchor_mod1', shape = self.dim_in1)
@@ -153,6 +147,9 @@ class SiamesseModel(tfk.Model):
         with tf.GradientTape() as tape:
             losses = self.network(data)
             loss_total = self.error_layer.total_loss(losses)
+            for reg_loss in self.network.losses:
+                loss_total += reg_loss
+
         losses['loss_total'] = loss_total
         # Storing the gradients of the loss function with respect to the
         # weights/parameters.
@@ -287,23 +284,20 @@ class SiameseModelManager:
             model.load_weights(filepath)
             log.info(f'Loaded encoder for {modality} from {filepath}')
 
-    def train(self, adata1 : sc.AnnData, adata2 : sc.AnnData, dataset_gen, gen_kwargs = None,
+    def train(self, modalities, triplet_dataset, n_data_points,
               lr :float = 0.0001, epochs :int = 100, minibatch_size :int = 256,
               margin : float = 1.0, correspondance_coeff : float = 0.1):
         if self.model is None:
             self.model = SiamesseModel(
-                dim_in1 = adata1.n_vars, dim_in2 = adata2.n_vars, dim_z = self.dim_z,
+                dim_in1 = modalities[0]['n_vars'], dim_in2 = modalities[1]['n_vars'], dim_z = self.dim_z,
                 margin = margin, correspondance_coeff = correspondance_coeff, verbose = self.verbose)
-            self.modality_encoders = {adata1.uns['modality'] : self.model.model1, adata2.uns['modality'] : self.model.model2}
+            self.modality_encoders = {modalities[0]['name'] : self.model.model1, modalities[1]['name'] : self.model.model2}
         tf.random.set_seed(self.seed)
 
-        if gen_kwargs == None:
-            gen_kwargs = {}
-        dataset, n_data_points = dataset_gen(adata1, adata2, **gen_kwargs)
-        dataset = dataset.shuffle(buffer_size = 8192)
+        triplet_dataset = triplet_dataset.shuffle(buffer_size = 8192)
 
-        self.train_dataset = dataset.take(round(n_data_points * 0.8))
-        self.val_dataset = dataset.skip(round(n_data_points * 0.8))
+        self.train_dataset = triplet_dataset.take(round(n_data_points * 0.8))
+        self.val_dataset = triplet_dataset.skip(round(n_data_points * 0.8))
 
         self.train_dataset = self.train_dataset.batch(minibatch_size, drop_remainder=False)
         self.val_dataset = self.val_dataset.batch(minibatch_size, drop_remainder=False)
@@ -332,22 +326,6 @@ class SiameseModelManager:
             return self.modality_encoders[modality]
         else:
             raise ValueError(f'No encoder found for modality {modality}')
-
-    # def latent_representation(self, adata_list : tp.List[sc.AnnData]):
-    #     Z_list = []
-    #     obs_list = []
-    #     for adata in adata_list:
-    #         X = adata.X.todense() if sparse.issparse(adata.X) else adata.X
-    #         modality = adata.uns['modality']
-    #         Z_predict = self.find_encoder(modality).predict(X)
-    #         Z_list.append(Z_predict)
-    #         obs = adata.obs[['cell_type', 'batch', 'site', 'donor']].copy()
-    #         obs['modality'] = modality
-    #         obs.index = obs.index + ('_' + modality)
-    #         obs_list.append(obs)
-    #
-    #     result = sc.AnnData(X = np.vstack(Z_list), obs = pd.concat(obs_list))
-    #     return result
 
     def transform_to_common_space(self, adata_list : tp.List[sc.AnnData], unify = False, obs_fields = None):
         Z_list = []
@@ -454,14 +432,20 @@ class SiameseModelManager:
 
         return outputs, anchor_items_mod1.shape[0]
 
-    def create_triplets_dataset_by_neighbours(self, adata1 : sc.AnnData, adata2 : sc.AnnData, **kwargs):
+
+def triplets_from_neighbours(adata1 : sc.AnnData, adata2 : sc.AnnData, **kwargs):
+        seed = kwargs.pop('seed', 42)
+        samples_per_anchor = kwargs.pop('samples_per_anchor', 1)
+        assert (isinstance(samples_per_anchor, int) and samples_per_anchor >= 1)
+
         n_obs = adata1.n_obs
-        anchor_items_mod1 = np.zeros((n_obs, adata1.n_vars), dtype = 'float32')
-        positive_items_mod1 = np.zeros((n_obs, adata1.n_vars), dtype = 'float32')
-        negative_items_mod1 = np.zeros((n_obs, adata1.n_vars), dtype = 'float32')
-        anchor_items_mod2 = np.zeros((n_obs, adata2.n_vars), dtype = 'float32')
-        positive_items_mod2 = np.zeros((n_obs, adata2.n_vars), dtype = 'float32')
-        negative_items_mod2 = np.zeros((n_obs, adata2.n_vars), dtype = 'float32')
+        n_out = n_obs * samples_per_anchor
+        anchor_items_mod1 = np.zeros((n_out, adata1.n_vars), dtype = 'float32')
+        positive_items_mod1 = np.zeros((n_out, adata1.n_vars), dtype = 'float32')
+        negative_items_mod1 = np.zeros((n_out, adata1.n_vars), dtype = 'float32')
+        anchor_items_mod2 = np.zeros((n_out, adata2.n_vars), dtype = 'float32')
+        positive_items_mod2 = np.zeros((n_out, adata2.n_vars), dtype = 'float32')
+        negative_items_mod2 = np.zeros((n_out, adata2.n_vars), dtype = 'float32')
         log.info('Computing neighbours...')
         sc.pp.neighbors(adata1, **kwargs)
         log.info('Done computing neighbours!')
@@ -469,28 +453,30 @@ class SiameseModelManager:
         X1 = adata1.X.todense() if sparse.issparse(adata1.X) else adata1.X
         X2 = adata2.X.todense() if sparse.issparse(adata2.X) else adata2.X
         neighbours = adata1.obsp['connectivities']
-        rng = np.random.default_rng(seed = self.seed)
+        rng = np.random.default_rng(seed = seed)
 
-        log.info('Creating triplets ...')
+        log.info(f'Creating {n_out} triplets...')
         for i in range(n_obs):
-            anchor_items_mod1[i, :] = X1[i, :]
-            anchor_items_mod2[i, :] = X2[i, :]
-
             _, neighb_ind = neighbours[i, :].nonzero()
-            pos_example_id = rng.choice(neighb_ind)
-            positive_items_mod1[i, :] = X1[pos_example_id, :]
-            positive_items_mod2[i, :] = X2[pos_example_id, :]
+            pos_example_id = rng.choice(neighb_ind, size = samples_per_anchor, replace = False)
+            for j in range(samples_per_anchor):
+                ind = i * samples_per_anchor + j
+                anchor_items_mod1[ind, :] = X1[i, :]
+                anchor_items_mod2[ind, :] = X2[i, :]
 
-            selected_negative_example = False
-            while not selected_negative_example:
-                negative_example_id = rng.choice(n_obs)
-                if not(np.isin(negative_example_id, neighb_ind)):
-                    negative_items_mod1[i, :] = X1[negative_example_id, :]
-                    negative_items_mod2[i, :] = X2[negative_example_id, :]
-                    selected_negative_example = True
+                positive_items_mod1[ind, :] = X1[pos_example_id[j], :]
+                positive_items_mod2[ind, :] = X2[pos_example_id[j], :]
+
+                selected_negative_example = False
+                while not selected_negative_example:
+                    negative_example_id = rng.choice(n_obs)
+                    if not(np.isin(negative_example_id, neighb_ind)):
+                        negative_items_mod1[ind, :] = X1[negative_example_id, :]
+                        negative_items_mod2[ind, :] = X2[negative_example_id, :]
+                        selected_negative_example = True
         log.info('Done creating triplets!')
 
-        outputs = [np.arange(n_obs), anchor_items_mod1, positive_items_mod1, negative_items_mod1,
+        outputs = [np.arange(n_out), anchor_items_mod1, positive_items_mod1, negative_items_mod1,
                    anchor_items_mod2, positive_items_mod2, negative_items_mod2]
 
         for i in range(len(outputs)):

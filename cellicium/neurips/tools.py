@@ -66,8 +66,8 @@ def nmf_transform(ds : ProblemDataset, spectral_map, layer = None):
 
 
 def get_cnmf_runner(adata, workdir, name, run_analysis = False, use_counts = True,
-                    num_components = 50, num_iterations = 100, minibatch_size = None):
-    cnmf_runner = cnmf.CNMFRunner(workdir, name, num_workers = 6)
+                    num_components = 50, num_iterations = 100, minibatch_size = None, num_workers = 4):
+    cnmf_runner = cnmf.CNMFRunner(workdir, name, num_workers = num_workers)
     if run_analysis:
         log.info('Saving count matrix')
         # adata_count = sc.AnnData(X = adata.layers['counts'], var = adata.var, obs = adata.obs)

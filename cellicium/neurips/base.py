@@ -62,3 +62,19 @@ class ProblemDataset(ProblemDatasetBase):
                 raise ValueError(f'Group must be train or test, not {group}')
         else:
             raise ValueError(f'Modality must be {self.modality1} or {self.modality2}, not {modality}')
+
+    def _subset_samples(self, predicate):
+        train_sel_mod1 = predicate(self.train_mod1, 'train', self.modality1)
+        train_sel_mod2 = predicate(self.train_mod2, 'train', self.modality2)
+        test_sel_mod1 = predicate(self.test_mod1, 'test', self.modality1)
+        test_sel_mod2 = predicate(self.test_mod1, 'test', self.modality2)
+        return ProblemDataset(
+            train_mod1 = self.train_mod1[train_sel_mod1, :],
+            train_mod2 = self.train_mod2[train_sel_mod2, :],
+            train_sol = self.train_sol[train_sel_mod1, train_sel_mod2],
+            test_mod1 = self.test_mod1[test_sel_mod1, :],
+            test_mod2 = self.test_mod2[test_sel_mod2, :],
+            test_sol= self.test_sol[test_sel_mod1, test_sel_mod2] if self.test_sol is not None else None,
+            modality1 = self.modality1,
+            modality2 = self.modality2
+        )
