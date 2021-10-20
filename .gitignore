@@ -6,3 +6,8 @@ __pycache__/
 *.csv
 *.loom
 *.mtx
+*.iml
+notebooks
+reports
+.idea
+out
