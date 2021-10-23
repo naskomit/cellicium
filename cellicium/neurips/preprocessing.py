@@ -180,6 +180,7 @@ def datasets_info(adata_dict):
 
     return result
 
+
 def cell_populations(adata : sc.AnnData, metric = 'percent'):
     cell_populations = adata.obs[['cell_type', 'batch', 'site']].groupby(['cell_type', 'batch']).count(). \
         rename(columns = {'site' : 'count'}).reset_index(). \
@@ -194,15 +195,17 @@ def cell_populations(adata : sc.AnnData, metric = 'percent'):
     else:
         raise ValueError(f'Unknown metric {metric}')
 
+
 def plot_batch_counts(adata):
     batches = adata.obs['batch'].unique()
-    fg = crna.pl.figure_grid(ncol = 4, ntotal = len(batches), figsize = (15, 5))
+    fg = crna.pl.figure_grid(n_col= 4, n_total= len(batches), figsize = (15, 5))
     for batch in batches:
         ax = next(fg)
         batch_data = adata.obs.loc[adata.obs['batch'] == batch, :]
         ax.set_title(batch)
         ax.set_xlim([0, 20000]); ax.set_ylim([0, 600])
         sb.histplot(batch_data['total_counts'], ax = ax)
+
 
 def select_batches(data, batches):
     if isinstance(batches, str):

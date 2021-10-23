@@ -140,33 +140,37 @@ def normalize_gex_nmf(adata):
     adata.X = np.log(1 + adata.X)
     return adata
 
-def prepare_training_data(input_data, nmf_spectra):
+def preprocess_adt(adata : sc.AnnData, annotations : pd.DataFrame) -> sc.AnnData:
+    # hv_adt = adata.var.join(annotations[['double_peak']])['double_peak']
+    # print(np.sum(hv_adt))
+    # return adata[:, hv_adt]
+    return adata
+
+def prepare_training_data(input_data : ProblemDataset, nmf_spectra, adt_annotations : pd.DataFrame):
     batch_var = 'site'
     if (input_data.modality1 == 'GEX') and (input_data.modality2 == 'ADT'):
         mod_combination = 'GEX+ADT'
         adt_all_data = input_data.combined_mod2
-        batch_coeff_adt = compute_linear_batch_correction(adt_all_data, by = batch_var)
+        # batch_coeff_adt = compute_linear_batch_correction(adt_all_data, by = batch_var)
         input_data_nmf = nmf_transform(input_data, nmf_spectra, layer = 'counts')
 
-        # n_gex_vars = input_data_nmf.test_mod1.n_vars
-        # n_adt_vars = input_data.test_mod2.n_vars
         result = input_data._replace(
             train_mod1 = normalize_gex_nmf(input_data_nmf.train_mod1),
             test_mod1 = normalize_gex_nmf(input_data_nmf.test_mod1),
-            # train_mod2 = apply_linear_batch_correction(input_data.train_mod2, batch_coeff_adt, by = batch_var),
-            # test_mod2 = apply_linear_batch_correction(input_data.test_mod2, batch_coeff_adt, by = batch_var),
+            train_mod2 = preprocess_adt(input_data.train_mod2, adt_annotations),
+            test_mod2 = preprocess_adt(input_data.test_mod2, adt_annotations),
             modality1 = 'GEX_NMF')
+        # train_mod2 = apply_linear_batch_correction(input_data.train_mod2, batch_coeff_adt, by = batch_var),
+        # test_mod2 = apply_linear_batch_correction(input_data.test_mod2, batch_coeff_adt, by = batch_var),
+
     elif (input_data.modality1 == 'ADT') and (input_data.modality2 == 'GEX'):
         mod_combination = 'GEX+ADT'
         adt_all_data = input_data.combined_mod1
-        batch_coeff_adt = compute_linear_batch_correction(adt_all_data, by = batch_var)
         input_data_nmf = nmf_transform(input_data, nmf_spectra, layer = 'counts')
 
-        # n_gex_vars = input_data_nmf.test_mod2.n_vars
-        # n_adt_vars = input_data.test_mod1.n_vars
         result = input_data._replace(
-            # train_mod1 = apply_linear_batch_correction(input_data.train_mod1, batch_coeff_adt, by = batch_var),
-            # test_mod1 = apply_linear_batch_correction(input_data.test_mod1, batch_coeff_adt, by = batch_var),
+            train_mod1 =  preprocess_adt(input_data.train_mod1, adt_annotations),
+            test_mod1 = preprocess_adt(input_data.test_mod1, adt_annotations),
             train_mod2 = normalize_gex_nmf(input_data_nmf.train_mod2),
             test_mod2 = normalize_gex_nmf(input_data_nmf.test_mod2),
             modality2 = 'GEX_NMF')

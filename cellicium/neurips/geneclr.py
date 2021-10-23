@@ -8,9 +8,12 @@ import typing as tp
 import os
 from cellicium.logging import logger as log
 import cellicium.scrna as crna
+from cellicium.utils import display
 from cellicium.logging import logger as log
 from . import nn_utils as nnu
 from . import base
+
+from tensorflow.python.framework.ops import EagerTensor
 
 
 class ContrastiveLossErrorLayer(tfk.layers.Layer):
@@ -18,6 +21,7 @@ class ContrastiveLossErrorLayer(tfk.layers.Layer):
         super().__init__()
         self.T = 1.0
         self.d0 = 1.0
+        self.print_counter = 0
 
     def cosine_similarity(self, z) -> tf.Tensor:
         # We would like latent vectors of roughly size 1
@@ -39,7 +43,8 @@ class ContrastiveLossErrorLayer(tfk.layers.Layer):
         dist_sq = norm_sq - 2 * tf.matmul(z, tf.transpose(z)) + tf.transpose(norm_sq)
         # Add ones to the diagonal to avoid infinities on computing 1/x
         dist_sq = dist_sq + tf.eye(tf.shape(z)[0])
-        sim = self.d0 / dist_sq
+        sim = self.d0 / (self.d0 + dist_sq)
+        # sim = tf.math.exp(- dist_sq / self.d0)
 
         return sim
 
@@ -48,77 +53,160 @@ class ContrastiveLossErrorLayer(tfk.layers.Layer):
         # Concatenate all the z points
         z = tf.concat(inputs, axis = 0)
 
-        #sim = self.cosine_similarity(z)
+        # sim = self.cosine_similarity(z)
         sim = self.distance_similarity(z)
 
-        # Exponentiate and remove diagonal
+        # Remove diagonal
         sim = sim - tf.linalg.diag(tf.linalg.diag_part(sim))
-
-        denom = tf.reduce_sum(sim, axis = 1)
+        eps = 0.0
+        denom = tf.reduce_sum(sim, axis = 1) + eps
 
         num1 = tf.linalg.diag_part(sim, k = n_samples)
         num2 = tf.linalg.diag_part(sim, k = -n_samples)
-        num = tf.concat([num1, num2], axis = 0)
+        num = tf.concat([num1, num2], axis = 0) + eps
 
-        loss = tf.math.log(num / denom)
-        loss = -tf.reduce_mean(loss)
+        loss = -tf.math.log(num/denom)
+        loss = tf.reduce_mean(loss)
+
+        # if isinstance(sim, EagerTensor) and tf.math.reduce_any(tf.math.is_nan(loss)):
+        #     tf.print('Got NaN')
+        #     display(pd.DataFrame(sim.numpy()))
+        #     display(pd.DataFrame(num.numpy()))
+        #     display(pd.DataFrame(denom.numpy()))
+        #     raise ValueError("Got NaN")
+
         return loss
 
 
-class ModeEncoder(base.EncoderModel):
-    def __init__(self, dim_in : int, dim_z : int, n_layers : int,
-                 dropout_rate :float = 0.2, l1 : float = 0.0, l2 : float = 0.0):
+class UnimodeEncoder(base.EncoderModel):
+    def __init__(self, dim_in : int, dim_z : int, n_layers : int, splitter_dropout_rate : float = 0.2,
+                 dropout_rate : float = 0.2, l1 : float = 0.0, l2 : float = 0.0):
         super().__init__()
         self.dim_in = dim_in
         self.dim_z = dim_z
         self.n_layers = n_layers
+        self.splitter_dropout_rate = splitter_dropout_rate
         self.dropout_rate = dropout_rate
         self.l1 = l1
         self.l2 = l2
         self.add_loss_tracker('contr_loss')
+        self.network = self.build_model()
 
     def build_block(self, x, relu = False):
         dense_kwargs = {}
         if self.l1 > 0 or self.l2 > 0:
             dense_kwargs['kernel_regularizer'] = tfk.regularizers.l1_l2(self.l1, self.l2)
-        x = tfk.layers.Dense(units = self.dim_z, **dense_kwargs)(x)
+        # x = tfk.layers.Dense(units = self.dim_z, **dense_kwargs)(x)
+        x = nnu.LinLogLayer(shape = self.dim_z, log_offset = 1.0)(x)
         x = tfk.layers.BatchNormalization()(x)
         if relu:
             x = tfk.layers.ReLU()(x)
         x = tfk.layers.Dropout(self.dropout_rate)(x)
         return x
 
-    def build_model(self) -> tfk.Model:
+    def build_model(self, **kwargs) -> tfk.Model:
         encoder_input = tfk.Input(self.dim_in, name = 'encoder input')
+        print(f'Building model with {self.n_layers} layers and {self.dim_z} latent dimensions')
         x = encoder_input
         for i in range(self.n_layers):
-            if i < self.n_layers - 1:
-                x = self.build_block(x, relu = True)
-            else:
-                x = self.build_block(x, relu = False)
-        # z = x
-        contrastive_loss = ContrastiveLossErrorLayer()(x)
-        return tfk.Model(encoder_input, {'contr_loss': contrastive_loss})
+            x = self.build_block(x, relu = True)
+
+        # if i < self.n_layers - 1:
+            #     x = self.build_block(x, relu = True)
+            # else:
+            #     x = self.build_block(x, relu = False)
+        z = x
+        encoder = tfk.Model(inputs = encoder_input, outputs = z, name = 'Encoder')
+
+        x1_input = tfk.Input(self.dim_in, name = 'input x1')
+        x2_input = tfk.Input(self.dim_in, name = 'input x2')
+
+        z1 = encoder(x1_input)
+        z2 = encoder(x2_input)
+
+        contrastive_loss = ContrastiveLossErrorLayer()((z1, z2))
+
+        self.encoder = encoder
+        model = tfk.Model(inputs = [x1_input, x2_input],
+                          outputs = {'contr_loss': contrastive_loss},
+                          name = 'UnimodeEncoder')
+
+        return model
+
+    # def transform_input(self, data):
+    #     mask1 = tf.cast(tf.greater(
+    #         tf.random.uniform(tf.shape(data), minval=0.0, maxval = 1.0),
+    #         self.splitter_dropout_rate),
+    #         tf.float32)
+    #     mask2 = tf.cast(tf.greater(
+    #         tf.random.uniform(tf.shape(data), minval=0.0, maxval = 1.0),
+    #         self.splitter_dropout_rate),
+    #         tf.float32)
+    #     # tf.print('dropout: ', self.dropout_rate)
+    #     # tf.print(tf.reduce_sum(tf.cast(mask1 == mask2, tf.float32)))
+    #     return [tf.multiply(mask1, data), tf.multiply(mask2, data)]
+    #
+    # def train_step(self, data):
+    #     data = self.transform_input(data)
+    #     return super().train_step(data)
+    #
+    # def test_step(self, data):
+    #     data = self.transform_input(data)
+    #     return super().train_step(data)
 
 
-class UnimodalManager(base.ModelManagerBase):
-    def __init__(self, dim_z, **kwargs):
+# def random_apply(func, p, x):
+#     """Randomly apply function func to x with probability p."""
+#     return tf.cond(
+#         tf.less(tf.random_uniform([], minval=0, maxval=1, dtype=tf.float32),
+#                 tf.cast(p, tf.float32)),
+#         lambda: func(x),
+#         lambda: x)
+
+class ADT_Preprocessor(base.ModelManagerBase):
+    def __init__(self, dim_z, n_layers, splitter_dropout_rate = 0.5, **kwargs):
         super().__init__(**kwargs)
         self.dim_z = dim_z
         self.n_vars = None
+        self.n_layers = n_layers
+        self.splitter_dropout_rate = splitter_dropout_rate
+
+    def save_encoders(self, dir):
+        if not os.path.exists(dir):
+            os.mkdir(dir)
+        self.model.encoder.save_weights(os.path.join(dir, f'ADT_preproc_encoder.h5'), save_format = 'hdf5')
 
     def build_model(self, **kwargs) -> tfk.Model:
         n_vars = kwargs.pop('n_vars')
-
-        return ModeEncoder(dim_in = n_vars, dim_z = self.dim_z, n_layers = 3)
+        model = UnimodeEncoder(dim_in = n_vars, dim_z = self.dim_z, n_layers = self.n_layers,
+                               splitter_dropout_rate = self.splitter_dropout_rate)
+        return model
 
     def train(self, adata : sc.AnnData, **kwargs):
         X = adata.X
         if sparse.issparse(X):
             X = X.todense()
-        mod_dataset = tf.data.Dataset.from_tensor_slices(X)
+
+        mod_dataset = tf.data.Dataset.from_tensor_slices(X.astype('float32'))
+
+        @tf.function
+        def map_fn(x):
+            mask1 = tf.cast(tf.greater(tf.random.uniform(tf.shape(x), maxval = 1.0), self.splitter_dropout_rate), tf.float32)
+            mask2 = tf.cast(tf.greater(tf.random.uniform(tf.shape(x), maxval = 1.0), self.splitter_dropout_rate), tf.float32)
+            # tf.print('dropout: ', self.splitter_dropout_rate)
+            # tf.print(tf.reduce_sum(tf.cast(mask1 == mask2, tf.float32)))
+            return [tf.multiply(mask1, x), tf.multiply(mask2, x)]
+
+        mod_dataset = mod_dataset.map(map_fn, num_parallel_calls = 4)
         kwargs['n_vars'] = adata.n_vars
-        self.do_train(mod_dataset, **kwargs)
+        self.do_train(mod_dataset, adata.n_obs, **kwargs)
+
+    def latent_representation(self, adata : sc.AnnData):
+        X = adata.X
+        X = X.todense() if sparse.issparse(X) else X
+        Z = self.model.encoder.predict(X)
+        result = sc.AnnData(X = Z, obs = adata.obs)
+        return result
 
 
 class GeneCLRModel(base.EncoderModel):
@@ -330,7 +418,7 @@ class MultimodalManager(base.ModelManagerBase):
         sc.pp.neighbors(adata_z)
         log.info('Computing umap')
         sc.tl.umap(adata_z)
-        fg = crna.pl.figure_grid(ncol = 2, nrow = 1, figsize = (40, 20))
+        fg = crna.pl.figure_grid(n_col= 2, n_row= 1, figsize = (40, 20))
         if color is None:
             color = ['modality']
         if 'modality' in color:

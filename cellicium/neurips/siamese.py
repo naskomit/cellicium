@@ -188,7 +188,7 @@ class SiameseModelManager(base.ModelManagerBase):
         adata = self.transform_to_common_space(adata_list, unify = True, obs_fields = obs_fields)
         sc.pp.neighbors(adata)
         sc.tl.umap(adata)
-        fg = crna.pl.figure_grid(ncol = 2, nrow = 1, figsize = (40, 20))
+        fg = crna.pl.figure_grid(n_col= 2, n_row= 1, figsize = (40, 20))
         if color is None:
             color = ['modality']
         if 'modality' in color:

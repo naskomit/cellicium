@@ -13,7 +13,6 @@ from . import tools as tl
 from . import deepnmf as deepnmf
 
 from .siamese import SiamesseModel, SiameseModelManager
-from . import siamese2
 from .geneclr import MultimodalManager
 
 # def matrix_min_max(X):

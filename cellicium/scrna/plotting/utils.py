@@ -3,16 +3,20 @@ import matplotlib.pyplot as plt
 #import scvelo.plotting.utils as scvpu
 
 # Creates a rectangular grid of figures/axes
-def figure_grid(ncol = 5, nrow = None, ntotal = None, figsize = None):
-    if nrow is None:
-        nrow = int(np.ceil(ntotal / ncol))
+def figure_grid(n_col = 5, n_row = None, n_total = None, figsize = None, width = None, row_height = None):
+    if n_row is None:
+        n_row = int(np.ceil(n_total / n_col))
 
     if figsize is None:
-        figsize = (20, 5 * nrow)
-    figure, axes = plt.subplots(nrow, ncol, figsize = figsize, squeeze = False, gridspec_kw = {'hspace': 0.3, 'wspace': 0.4})
+        if width is None:
+            width = 20
+        if row_height is None:
+            row_height = 10
+        figsize = (width, row_height * n_row)
+    figure, axes = plt.subplots(n_row, n_col, figsize = figsize, squeeze = False, gridspec_kw = {'hspace': 0.3, 'wspace': 0.4})
     index = 0
-    for row in range(nrow):
-        for col in range(ncol):
+    for row in range(n_row):
+        for col in range(n_col):
             ax = axes[row, col]
             yield ax
 

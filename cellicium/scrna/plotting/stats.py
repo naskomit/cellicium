@@ -7,7 +7,7 @@ import tensorflow_probability as tfp
 from .utils import figure_grid
 
 def zero_statistics(adata):
-    fg = figure_grid(nrow = 2, ncol = 2)
+    fg = figure_grid(n_row= 2, n_col= 2)
 
     ax = next(fg)
     sb.histplot(adata.obs['frac_zeros'], bins = 20, ax = ax)

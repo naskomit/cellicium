@@ -138,7 +138,7 @@ def fit_peaks(adata, gene_list, layer = None, plots = False):
     if plots:
         x1 = np.linspace(0, 1, 100).reshape((-1, 1))
         y1 = gene_model.predict(x1)
-        fg = figure_grid(ncol = 4, ntotal = len(gene_list))
+        fg = figure_grid(n_col= 4, n_total= len(gene_list))
         gene_index = 0
         for gene, ax in zip(gene_list, fg):
             ax.scatter(x, y[:, gene_index])
