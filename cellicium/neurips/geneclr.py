@@ -12,9 +12,13 @@ from cellicium.utils import display
 from cellicium.logging import logger as log
 from . import nn_utils as nnu
 from . import base
+import sklearn.neighbors as sknn
 
 from tensorflow.python.framework.ops import EagerTensor
 
+#################################################
+# Contrastive learning models self vs. others
+#################################################
 
 class ContrastiveLossErrorLayer(tfk.layers.Layer):
     def __init__(self):
@@ -99,9 +103,9 @@ class UnimodeEncoder(base.EncoderModel):
         # x = tfk.layers.Dense(units = self.dim_z, **dense_kwargs)(x)
         x = nnu.LinLogLayer(shape = self.dim_z, log_offset = 1.0)(x)
         x = tfk.layers.BatchNormalization()(x)
-        if relu:
-            x = tfk.layers.ReLU()(x)
-        x = tfk.layers.Dropout(self.dropout_rate)(x)
+        # if relu:
+        x = tfk.layers.Lambda(lambda y : tf.math.softplus(y))(x)
+        # x = tfk.layers.Dropout(self.dropout_rate)(x)
         return x
 
     def build_model(self, **kwargs) -> tfk.Model:
@@ -171,10 +175,17 @@ class ADT_Preprocessor(base.ModelManagerBase):
         self.n_layers = n_layers
         self.splitter_dropout_rate = splitter_dropout_rate
 
-    def save_encoders(self, dir):
+    def save_encoder(self, dir):
         if not os.path.exists(dir):
             os.mkdir(dir)
-        self.model.encoder.save_weights(os.path.join(dir, f'ADT_preproc_encoder.h5'), save_format = 'hdf5')
+        filepath = os.path.join(dir, f'ADT_preproc_encoder.h5')
+        self.model.encoder.save_weights(filepath, save_format = 'hdf5')
+
+    def load_encoder(self, dir, n_vars):
+        self.model = UnimodeEncoder(dim_in = n_vars, dim_z = self.dim_z, n_layers = self.n_layers,
+                               splitter_dropout_rate = self.splitter_dropout_rate)
+        filepath = os.path.join(dir, f'ADT_preproc_encoder.h5')
+        self.model.encoder.load_weights(filepath)
 
     def build_model(self, **kwargs) -> tfk.Model:
         n_vars = kwargs.pop('n_vars')
@@ -426,3 +437,267 @@ class MultimodalManager(base.ModelManagerBase):
         if 'cell_type' in color:
             sc.pl.umap(adata_z, color = 'cell_type', ax = next(fg), s = 20, show = False, legend_loc = 'on data')
         return adata_z
+
+#################################################
+# Contrastive learning models using triplets
+#################################################
+
+class DoubleTripletLossLayer(tfk.layers.Layer):
+    """
+    This layer is responsible for computing the distance between the anchor
+    embedding and the positive embedding, and the anchor embedding and the
+    negative embedding.
+    """
+    def __init__(self, margin, **kwargs):
+        super().__init__(**kwargs)
+        self.margin = margin
+
+    @staticmethod
+    def distance_2(x1, x2):
+        return tf.reduce_sum(tf.square(x1 - x2), axis = -1)
+
+    def call(self, input, *args, **kwargs):
+        ((anchor_z1, positive_z1, negative_z1), (anchor_z2, positive_z2, negative_z2)) = input
+        loss_corresp = (self.distance_2(anchor_z1, anchor_z2) +
+                        self.distance_2(positive_z1, positive_z2) +
+                        self.distance_2(negative_z1, negative_z2))
+
+        ap_distance = self.distance_2(anchor_z1, positive_z1)
+        an_distance = self.distance_2(anchor_z1, negative_z1)
+        # Computing the Triplet Loss by subtracting both distances and
+        # making sure we don't get a negative value.
+        loss_pos_neg = tf.maximum(ap_distance - an_distance + self.margin, 0.0)
+        loss = {'corresp_loss': tf.reduce_mean(loss_corresp), 'pos_neg_loss': tf.reduce_mean(loss_pos_neg)}
+        return loss
+
+
+class DoubleTripletModel(base.EncoderModel):
+    def __init__(self, dim_in1, dim_in2, dim_z = 20, margin = 1.0, correspondance_coeff = 0.01):
+        super().__init__()
+        self.dim_in1 = dim_in1
+        self.dim_in2 = dim_in2
+        self.dim_z = dim_z
+        self.margin = margin
+        self.correspondance_coeff = correspondance_coeff
+        self.add_loss_tracker("corresp_loss", gain = correspondance_coeff)
+        self.add_loss_tracker("pos_neg_loss")
+        self.dropout_rate = 0.3
+        self.log_offset = 1.0
+        self.n_layers = 3
+
+        self.network = self.build_model()
+
+    def assemble_block(self, input, last = False):
+        x = input
+        # x = tfk.layers.Dense(self.dim_z)(x)
+        x = nnu.LinLogLayer(shape = self.dim_z, log_offset = self.log_offset)(x)
+        if not last:
+            x = tfk.layers.Lambda(lambda y : tf.math.softplus(y))(x)
+        x = tfk.layers.BatchNormalization()(x)
+        if not last:
+            x = tfk.layers.Dropout(self.dropout_rate)(x)
+        return x
+
+    def assemble_encoder(self, input):
+        x = input
+        for i in range(self.n_layers):
+            last = (i == self.n_layers - 1)
+            x = self.assemble_block(x, last = last)
+        z = x
+        model = tfk.Model(input, z)
+        return model
+
+    def build_model(self) -> tfk.Model:
+        input1 = tfk.Input(self.dim_in1, name = 'encoder1 input')
+        encoder1 = self.assemble_encoder(input1)
+
+        input2 = tfk.Input(self.dim_in2, name = 'mod2 input')
+        encoder2 = self.assemble_encoder(input2)
+
+        anchor_index = tfk.Input(name = 'anchor_index', shape = 1)
+        anchor_input_mod1 = tfk.Input(name = 'anchor_mod1', shape = self.dim_in1)
+        positive_input_mod1 = tfk.Input(name = 'positive_mod1', shape = self.dim_in1)
+        negative_input_mod1 = tfk.Input(name = 'negative_mod1', shape = self.dim_in1)
+        anchor_input_mod2 = tfk.Input(name = 'anchor_mod2', shape = self.dim_in2)
+        positive_input_mod2 = tfk.Input(name = 'positive_mod2', shape = self.dim_in2)
+        negative_input_mod2 = tfk.Input(name = 'negative_mod2', shape = self.dim_in2)
+
+        anchor_z1 = encoder1(anchor_input_mod1)
+        positive_z1 = encoder1(positive_input_mod1)
+        negative_z1 = encoder1(negative_input_mod1)
+
+        anchor_z2 = encoder2(anchor_input_mod2)
+        positive_z2 = encoder2(positive_input_mod2)
+        negative_z2 = encoder2(negative_input_mod2)
+
+        # Add a layer computing the losses
+        self.loss_layer = DoubleTripletLossLayer(self.margin)
+        model_losses = self.loss_layer(((anchor_z1, positive_z1, negative_z1), (anchor_z2, positive_z2, negative_z2)))
+
+        network = tfk.Model(inputs = [anchor_index, anchor_input_mod1, positive_input_mod1, negative_input_mod1, anchor_input_mod2, positive_input_mod2, negative_input_mod2],
+                            outputs = model_losses, name = 'SiameseModelNetwork')
+        self.encoder1 = encoder1
+        self.encoder2 = encoder2
+        return network
+
+
+class DoubleTripletModelManager(base.ModelManagerBase):
+    def __init__(self, dim_z : int = 20, **kwargs):
+        super().__init__(**kwargs)
+        self.dim_z = dim_z
+        self.modality_encoders : tp.Dict[str, tfk.Model] = {}
+        self.modality_decoders : tp.Dict[str, tfk.Model] = {}
+
+    def save_model(self, dir : str):
+        if not os.path.exists(dir):
+            os.mkdir(dir)
+        for k, v in self.modality_encoders.items():
+            v.save_weights(os.path.join(dir, f'{k}_encoder.h5'), save_format = 'hdf5')
+        # for k, v in self.modality_decoders.items():
+        #     v.save_weights(os.path.join(dir, f'{k}_decoder.h5'), save_format = 'hdf5')
+
+    def load_model(self, dir : str, dims_dict):
+        modalities = list(dims_dict.keys())
+        if self.model is None:
+            self.model = DoubleTripletModel(
+                dim_in1 = dims_dict[modalities[0]], dim_in2 = dims_dict[modalities[1]], dim_z = self.dim_z)
+        self.modality_encoders = {}
+        for modality, model in zip(modalities, [self.model.encoder1, self.model.encoder2]):
+            self.modality_encoders[modality] = model
+            filepath = os.path.join(dir, modality + '.h5')
+            model.load_weights(filepath)
+            log.info(f'Loaded encoder for {modality} from {filepath}')
+
+    def find_encoder(self, modality):
+        if modality in self.modality_encoders:
+            return self.modality_encoders[modality]
+        else:
+            raise ValueError(f'No encoder found for modality {modality}')
+
+    def build_model(self, **kwargs) -> tfk.Model:
+        mod1_nvars = kwargs.pop('mod1_nvars')
+        mod2_nvars = kwargs.pop('mod2_nvars')
+
+        modality1 = kwargs.pop('modality1')
+        modality2 = kwargs.pop('modality2')
+        margin = kwargs.pop('margin')
+        correspondance_coeff = kwargs.pop('correspondance_coeff')
+        model = DoubleTripletModel(
+            dim_in1 = mod1_nvars, dim_in2 = mod2_nvars, dim_z = self.dim_z,
+            margin = margin, correspondance_coeff = correspondance_coeff)
+
+        self.modality_encoders = {
+            modality1 : model.encoder1, modality2 : model.encoder2
+        }
+
+        return model
+
+    def train(self, ds : base.ProblemDataset, major_modality, minor_modality, n_neighbors = 100, **kwargs):
+        n_samples = ds.train_mod1.n_obs
+        # n_neighbors = kwargs.pop('n_neighbors', 10)
+        kwargs['mod1_nvars'] = ds.get_data('train', major_modality).n_vars
+        kwargs['mod2_nvars'] = ds.get_data('train', minor_modality).n_vars
+        kwargs['modality1'] = major_modality
+        kwargs['modality2'] = minor_modality
+
+        def ensure_dense(X):
+            X_dense = X.todense() if sparse.issparse(X) else X
+            X_dense = np.asarray(X_dense)
+            return X_dense
+
+        X1 = ensure_dense(ds.get_data('train', major_modality, sort = True).X)
+        X2 = ensure_dense(ds.get_data('train', minor_modality, sort = True).X)
+
+        log.info('Computing neighbours...')
+        neighb_model = sknn.NearestNeighbors(n_neighbors = n_neighbors + 1).fit(X1)
+        __, neighbors = neighb_model.kneighbors(X = X1)
+        # Remove the closest point (which is the point itsef at d = 0)
+        neighbors = neighbors[:, 1:]
+        log.info(f'Done computing neighbours! {neighbors.shape}')
+
+
+        # rng = np.random.default_rng(seed = self.seed)
+
+        neighbors = tf.convert_to_tensor(neighbors)
+        X1 = tf.convert_to_tensor(X1)
+        X2 = tf.convert_to_tensor(X2)
+
+        # @tf.function
+        def map_fn(anchor_index):
+            # pos_example_id = rng.choice(n_neighbors, size = None) #tf.random.uniform((1,), maxval = n_neighbors, dtype = tf.dtypes.int32)
+            # pos_example_id = neighbors[ind, pos_example_id]
+            # neg_example_id = rng.choice(n_samples, size = None) #tf.random.uniform((1,), maxval = n_samples, dtype = tf.dtypes.int32)
+
+            pos_example_id = tf.random.uniform((), maxval = n_neighbors, dtype = tf.dtypes.int32)
+            pos_example_id = neighbors[anchor_index, pos_example_id]
+            neg_example_id = tf.random.uniform((), maxval = n_samples, dtype = tf.dtypes.int32)
+
+            anchor_mod1 = X1[anchor_index, :]
+            anchor_mod2 = X2[anchor_index, :]
+            pos_mod1 = X1[pos_example_id, :]
+            pos_mod2 = X2[pos_example_id, :]
+            neg_mod1 = X1[neg_example_id, :]
+            neg_mod2 = X2[neg_example_id, :]
+
+            return (anchor_index, anchor_mod1, pos_mod1, neg_mod1,
+                    anchor_mod2, pos_mod2, neg_mod2)
+
+        dataset = tf.data.Dataset.from_tensor_slices(tf.range(n_samples))
+        triplet_dataset = dataset.map(map_fn)
+
+        log.info('Creating dataset!')
+        # triplet_dataset = tf.data.Dataset.from_generator(
+        #     triplet_generator, output_signature = (
+        #         tf.TensorSpec(shape=(), dtype=tf.int32),
+        #         tf.TensorSpec(shape=(X1.shape[1], ), dtype=tf.float32),
+        #         tf.TensorSpec(shape=(X1.shape[1], ), dtype=tf.float32),
+        #         tf.TensorSpec(shape=(X1.shape[1], ), dtype=tf.float32),
+        #         tf.TensorSpec(shape=(X2.shape[1], ), dtype=tf.float32),
+        #         tf.TensorSpec(shape=(X2.shape[1], ), dtype=tf.float32),
+        #         tf.TensorSpec(shape=(X2.shape[1], ), dtype=tf.float32)
+        #     ))
+
+
+        self.do_train(triplet_dataset, n_samples, **kwargs)
+
+    def transform_to_common_space(self, adata_list : tp.List[sc.AnnData], unify = False, obs_fields = None):
+        Z_list = []
+        for adata in adata_list:
+            X = adata.X.todense() if sparse.issparse(adata.X) else adata.X
+            modality = adata.uns['modality']
+            Z_predict = self.find_encoder(modality).predict(X)
+            Z_list.append(Z_predict)
+
+        if unify:
+            obs_list = []
+            for adata in adata_list:
+                modality = adata.uns['modality']
+                if obs_fields:
+                    obs = adata.obs[obs_fields].copy()
+                else:
+                    obs = pd.DataFrame({}, index = adata.obs.index)
+                obs['modality'] = modality
+                obs.index = obs.index + ('_' + modality)
+                obs_list.append(obs)
+            result = sc.AnnData(X = np.vstack(Z_list), obs = pd.concat(obs_list))
+        else:
+            result = []
+            for i, adata in enumerate(adata_list):
+                modality = adata.uns['modality']
+                result.append(sc.AnnData(X = Z_list[i], obs = adata.obs,
+                                         uns = {'modality': modality}))
+
+        return result
+
+    def plot_integration_umap(self, adata_list : tp.List[sc.AnnData], color = None, obs_fields = None):
+        adata = self.transform_to_common_space(adata_list, unify = True, obs_fields = obs_fields)
+        sc.pp.neighbors(adata)
+        sc.tl.umap(adata)
+        fg = crna.pl.figure_grid(n_col= 2, n_row= 1, figsize = (40, 20))
+        if color is None:
+            color = ['modality']
+        if 'modality' in color:
+            sc.pl.umap(adata, color = 'modality', ax = next(fg), s = 20, show = False)
+        if 'cell_type' in color:
+            sc.pl.umap(adata, color = 'cell_type', ax = next(fg), s = 20, show = False, legend_loc = 'on data')
+        return adata

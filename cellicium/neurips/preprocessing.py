@@ -14,7 +14,7 @@ base_path_match_modality = '/home/jovyan/neurips/starter-kits/match-modality/out
 
 base_paths = {
     'benchmark-cite': '/home/jovyan/neurips/datasets/cite/',
-    'benchmark-multiome': '/home/jovyan/neurips/datasets/cite/',
+    'benchmark-multiome': '/home/jovyan/neurips/datasets/multiome/',
     'openproblems_bmmc_cite_phase1_mod2' : base_path_match_modality,
     'openproblems_bmmc_cite_phase1_rna': base_path_match_modality,
     'openproblems_bmmc_multiome_phase1_mod2': base_path_match_modality,
@@ -42,10 +42,17 @@ def load_data(name, **kwargs) -> ProblemDataset:
         gex_data.uns['modality'] = 'GEX'
         atac_data.uns['modality'] = 'atac'
 
-        train_selector = gex_data.obs['batch'].isin(['s3d6', 's2d1', 's2d4', 's1d1'])
-        test_selector = gex_data.obs['batch'].isin(['s1d2', 's3d7'])
+        all_batches = set(gex_data.obs['batch'].unique())
+        test_batches = set(kwargs.pop('test_batches', ['s1d2', 's3d7']))
+        train_batches = all_batches.difference(test_batches)
+        log.info(f'Train batches: {train_batches}')
+        log.info(f'Test batches: {test_batches}')
+        train_selector = gex_data.obs['batch'].isin(train_batches)
+        test_selector = gex_data.obs['batch'].isin(test_batches)
         n_train = np.sum(train_selector)
         n_test = np.sum(test_selector)
+        log.info(f'Num train samples: {n_train}')
+        log.info(f'Num test samples: {n_test}')
 
         train_mix = rng.choice(n_train, size = n_train, replace = False)
         test_mix = rng.choice(n_test, size = n_test, replace = False)
@@ -79,10 +86,17 @@ def load_data(name, **kwargs) -> ProblemDataset:
         gex_data.uns['modality'] = 'GEX'
         adt_data.uns['modality'] = 'ADT'
 
-        train_selector = gex_data.obs['batch'].isin(['s3d6', 's2d1', 's2d4', 's1d1'])
-        test_selector = gex_data.obs['batch'].isin(['s1d2', 's3d7'])
+        all_batches = set(gex_data.obs['batch'].unique())
+        test_batches = set(kwargs.pop('test_batches', ['s1d2', 's3d7']))
+        train_batches = all_batches.difference(test_batches)
+        log.info(f'Train batches: {train_batches}')
+        log.info(f'Test batches: {test_batches}')
+        train_selector = gex_data.obs['batch'].isin(train_batches)
+        test_selector = gex_data.obs['batch'].isin(test_batches)
         n_train = np.sum(train_selector)
         n_test = np.sum(test_selector)
+        log.info(f'Num train samples: {n_train}')
+        log.info(f'Num test samples: {n_test}')
 
         train_mix = rng.choice(n_train, size = n_train, replace = False)
         test_mix = rng.choice(n_test, size = n_test, replace = False)
@@ -112,6 +126,14 @@ def load_data(name, **kwargs) -> ProblemDataset:
         input_train_mod2.uns['modality'] = modality2
         input_test_mod1.uns['modality'] = modality1
         input_test_mod2.uns['modality'] = modality2
+
+        train_batches = set(input_train_mod1.obs['batch'].unique())
+        test_batches = set(input_test_mod1.obs['batch'].unique())
+        log.info(f'Train batches: {train_batches}')
+        log.info(f'Test batches: {test_batches}')
+        log.info(f'Num train samples: {input_train_mod1.obs.shape[0]}')
+        log.info(f'Num test samples: {input_test_mod1.obs.shape[0]}')
+
 
         result = ProblemDataset(
             train_mod1 = input_train_mod1,
