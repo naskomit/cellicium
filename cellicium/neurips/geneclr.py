@@ -472,7 +472,7 @@ class DoubleTripletLossLayer(tfk.layers.Layer):
 
 
 class DoubleTripletModel(base.EncoderModel):
-    def __init__(self, dim_in1, dim_in2, dim_z = 20, margin = 1.0, correspondance_coeff = 0.01):
+    def __init__(self, dim_in1, dim_in2, dim_z = 20, n_layers = 1, margin = 1.0, correspondance_coeff = 0.01):
         super().__init__()
         self.dim_in1 = dim_in1
         self.dim_in2 = dim_in2
@@ -483,7 +483,7 @@ class DoubleTripletModel(base.EncoderModel):
         self.add_loss_tracker("pos_neg_loss")
         self.dropout_rate = 0.3
         self.log_offset = 1.0
-        self.n_layers = 3
+        self.n_layers = n_layers
 
         self.network = self.build_model()
 
@@ -542,9 +542,10 @@ class DoubleTripletModel(base.EncoderModel):
 
 
 class DoubleTripletModelManager(base.ModelManagerBase):
-    def __init__(self, dim_z : int = 20, **kwargs):
+    def __init__(self, dim_z : int = 20, n_layers : int = 1, **kwargs):
         super().__init__(**kwargs)
         self.dim_z = dim_z
+        self.n_layers = n_layers
         self.modality_encoders : tp.Dict[str, tfk.Model] = {}
         self.modality_decoders : tp.Dict[str, tfk.Model] = {}
 
@@ -560,7 +561,8 @@ class DoubleTripletModelManager(base.ModelManagerBase):
         modalities = list(dims_dict.keys())
         if self.model is None:
             self.model = DoubleTripletModel(
-                dim_in1 = dims_dict[modalities[0]], dim_in2 = dims_dict[modalities[1]], dim_z = self.dim_z)
+                dim_in1 = dims_dict[modalities[0]], dim_in2 = dims_dict[modalities[1]], dim_z = self.dim_z,
+                n_layers = self.n_layers)
         self.modality_encoders = {}
         for modality, model in zip(modalities, [self.model.encoder1, self.model.encoder2]):
             self.modality_encoders[modality] = model
@@ -583,7 +585,7 @@ class DoubleTripletModelManager(base.ModelManagerBase):
         margin = kwargs.pop('margin')
         correspondance_coeff = kwargs.pop('correspondance_coeff')
         model = DoubleTripletModel(
-            dim_in1 = mod1_nvars, dim_in2 = mod2_nvars, dim_z = self.dim_z,
+            dim_in1 = mod1_nvars, dim_in2 = mod2_nvars, dim_z = self.dim_z, n_layers = self.n_layers,
             margin = margin, correspondance_coeff = correspondance_coeff)
 
         self.modality_encoders = {
@@ -643,7 +645,7 @@ class DoubleTripletModelManager(base.ModelManagerBase):
                     anchor_mod2, pos_mod2, neg_mod2)
 
         dataset = tf.data.Dataset.from_tensor_slices(tf.range(n_samples))
-        triplet_dataset = dataset.map(map_fn)
+        triplet_dataset = dataset.map(map_fn, num_parallel_calls = 8, deterministic = False)
 
         log.info('Creating dataset!')
         # triplet_dataset = tf.data.Dataset.from_generator(

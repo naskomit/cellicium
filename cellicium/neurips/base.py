@@ -186,7 +186,7 @@ class ModelManagerBase(abc.ABC):
         train_dataset = dataset.take(n_train)
         val_dataset = dataset.skip(n_train)
 
-        minibatch_size = kwargs.pop('minibatch_size', None)
+        minibatch_size = kwargs.pop('minibatch_size', 256)
         if minibatch_size is not None:
             train_dataset = train_dataset.batch(minibatch_size, drop_remainder=False)
             val_dataset = val_dataset.batch(minibatch_size, drop_remainder=False)
@@ -206,6 +206,7 @@ class ModelManagerBase(abc.ABC):
             self.train_dataset, epochs = epochs, validation_data = self.val_dataset,
             verbose = False, callbacks = [self.progress_tracker]
         )
+        # self.model.summary(line_length = 100)
         self.epochs_passed = epochs
         self.history = training_log.history
 

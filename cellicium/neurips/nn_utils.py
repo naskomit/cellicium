@@ -10,8 +10,8 @@ def ensure_dense(X):
 
 
 class LinLogLayer(tfk.layers.Layer):
-    def __init__(self, shape, log_offset):
-        super().__init__()
+    def __init__(self, shape, log_offset, name = None):
+        super().__init__(name = name)
         self.shape = shape
         self.log_offset = log_offset
 

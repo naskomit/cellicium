@@ -11,9 +11,11 @@
 from . import preprocessing as pp
 from . import tools as tl
 from . import deepnmf as deepnmf
+from . import vae
 
 from .siamese import SiamesseModel, SiameseModelManager
 from .geneclr import MultimodalManager
+from . import gmm
 
 # def matrix_min_max(X):
 #     i_min = np.argmin(X)
