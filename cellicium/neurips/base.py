@@ -5,6 +5,7 @@ import abc
 import typing as tp
 import tensorflow as tf
 import tensorflow.keras as tfk
+import tensorflow_addons as tfa
 from . import nn_utils as nnu
 
 ProblemDatasetBase = coll.namedtuple(
@@ -172,53 +173,27 @@ class ModelManagerBase(abc.ABC):
         self.epochs_passed = 0
         self.history = None
         self.run_eagerly = False
+        self.training_plan : nnu.TrainingPlan = None
 
     @abc.abstractmethod
     def build_model(self, **kwargs) -> tfk.Model:
         pass
 
-    def do_train(self, dataset : tf.data.Dataset, n_samples, **kwargs):
+    def do_train(self, dataset : tf.data.Dataset, n_samples, training_plan : nnu.TrainingPlan, **kwargs):
         tf.random.set_seed(self.seed)
-        validation_split = kwargs.pop('validation_split', 0.2)
-        n_train = round(n_samples * (1-validation_split))
-        print(f'Number of train/validation samples: {n_train} / {n_samples - n_train}')
-        dataset = dataset.shuffle(buffer_size = 8192)
-        train_dataset = dataset.take(n_train)
-        val_dataset = dataset.skip(n_train)
-
-        minibatch_size = kwargs.pop('minibatch_size', 256)
-        if minibatch_size is not None:
-            train_dataset = train_dataset.batch(minibatch_size, drop_remainder=False)
-            val_dataset = val_dataset.batch(minibatch_size, drop_remainder=False)
-
-        self.train_dataset = train_dataset
-        self.val_dataset = val_dataset
-
-        epochs = kwargs.pop('epochs', 100)
-        lr = kwargs.pop('lr', 1e-4)
-        self.run_eagerly = kwargs.pop('run_eagerly', False)
-
-        self.progress_tracker = nnu.EpochProgressCallback(epochs)
+        self.training_plan = training_plan
+        self.progress_tracker = nnu.EpochProgressCallback(training_plan.epochs)
 
         self.model = self.build_model(**kwargs)
-        self.model.compile(optimizer = tfk.optimizers.Adam(lr), run_eagerly = self.run_eagerly)
-        training_log = self.model.fit(
-            self.train_dataset, epochs = epochs, validation_data = self.val_dataset,
-            verbose = False, callbacks = [self.progress_tracker]
-        )
-        # self.model.summary(line_length = 100)
-        self.epochs_passed = epochs
+        self.model.set_training_plan(training_plan)
+        callbacks = [self.progress_tracker]
+        training_log = training_plan.execute(self.model, dataset, n_samples, callbacks)
+        self.epochs_passed = training_plan.epochs
         self.history = training_log.history
 
-    def extend_train(self, lr = 0.0001, epochs = 100):
-        if (self.train_dataset is None) or (self.val_dataset is None):
-            raise RuntimeError('Cannot extend training if no initial training is performed')
-        self.model.compile(optimizer = tfk.optimizers.Adam(lr), run_eagerly = self.run_eagerly)
+    def extend_train(self, epochs = 100, lr = 0.0001):
         self.progress_tracker.set_offset(self.epochs_passed)
-        training_log = self.model.fit(
-            self.train_dataset, epochs = epochs, validation_data = self.val_dataset,
-            verbose = False, callbacks = [self.progress_tracker]
-        )
+        training_log = self.training_plan.execute_further(self.model, epochs = epochs, lr = lr)
         self.epochs_passed += epochs
         for k,v in training_log.history.items():
             self.history[k] += v
