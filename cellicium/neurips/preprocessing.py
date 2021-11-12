@@ -15,10 +15,12 @@ base_path_match_modality = '/home/jovyan/neurips/starter-kits/match-modality/out
 base_paths = {
     'benchmark-cite': '/home/jovyan/neurips/datasets/cite/',
     'benchmark-multiome': '/home/jovyan/neurips/datasets/multiome/',
+    'benchmark-multiome-genes': '/home/jovyan/neurips/datasets/multiome/',
     'openproblems_bmmc_cite_phase1_mod2' : base_path_match_modality,
     'openproblems_bmmc_cite_phase1_rna': base_path_match_modality,
     'openproblems_bmmc_multiome_phase1_mod2': base_path_match_modality,
-    'openproblems_bmmc_multiome_phase1_rna': base_path_match_modality
+    'openproblems_bmmc_multiome_phase1_rna': base_path_match_modality,
+    'benchmark-cite-vae': '/home/jovyan/neurips/notebooks/nasko/SCVI_OUT'
 }
 
 def load_data(name, **kwargs) -> ProblemDataset:
@@ -40,7 +42,7 @@ def load_data(name, **kwargs) -> ProblemDataset:
         atac_data.obs['donor'] = atac_data.obs['batch'].str.slice(2, 4)
 
         gex_data.uns['modality'] = 'GEX'
-        atac_data.uns['modality'] = 'atac'
+        atac_data.uns['modality'] = 'ATAC'
 
         all_batches = set(gex_data.obs['batch'].unique())
         test_batches = set(kwargs.pop('test_batches', ['s1d2', 's3d7']))
@@ -67,6 +69,61 @@ def load_data(name, **kwargs) -> ProblemDataset:
             modality1 = 'GEX',
             modality2 = 'ATAC'
         )
+    elif name == 'benchmark-multiome-genes':
+        base_path = base_paths[name]
+        gex_path = os.path.join(base_path, 'multiome_gex_processed_training.h5ad')
+        atac_path = os.path.join(base_path, 'multiome_atac_processed_training.h5ad')
+        gene_weigths_loc = os.path.join(base_path, 'weights_by_distance.h5ad')
+
+        log.info(f'Loading GEX from {gex_path}')
+        gex_data = sc.read_h5ad(gex_path)
+        log.info(f'Loading ATAC from {atac_path}')
+        atac_data = sc.read_h5ad(atac_path)
+        log.info(f'Loading ATAC gene weights from {gene_weigths_loc}')
+        gene_weights = sc.read_h5ad(gene_weigths_loc)
+
+        # No total_counts is present in gex_data
+        gex_data.obs['total_counts'] = np.sum(gex_data.layers['counts'], axis = 1)
+        gex_data.obs['site'] = gex_data.obs['batch'].str.slice(0, 2)
+        gex_data.obs['donor'] = gex_data.obs['batch'].str.slice(2, 4)
+        atac_data.obs['site'] = atac_data.obs['batch'].str.slice(0, 2)
+        atac_data.obs['donor'] = atac_data.obs['batch'].str.slice(2, 4)
+
+        log.info(f'Associating peaks with genes')
+        atac_gene_counts = np.dot(atac_data.X, gene_weights.X.T)
+        atac_genes = sc.AnnData(X = atac_gene_counts, obs = atac_data.obs, var = gene_weights.obs)
+        atac_genes.layers['counts'] = atac_genes.X
+        del atac_data
+
+        gex_data.uns['modality'] = 'GEX'
+        atac_genes.uns['modality'] = 'ATAC'
+
+
+        all_batches = set(gex_data.obs['batch'].unique())
+        test_batches = set(kwargs.pop('test_batches', ['s1d2', 's3d7']))
+        train_batches = all_batches.difference(test_batches)
+        log.info(f'Train batches: {train_batches}')
+        log.info(f'Test batches: {test_batches}')
+        train_selector = gex_data.obs['batch'].isin(train_batches)
+        test_selector = gex_data.obs['batch'].isin(test_batches)
+        n_train = np.sum(train_selector)
+        n_test = np.sum(test_selector)
+        log.info(f'Num train samples: {n_train}')
+        log.info(f'Num test samples: {n_test}')
+
+        train_mix = rng.choice(n_train, size = n_train, replace = False)
+        test_mix = rng.choice(n_test, size = n_test, replace = False)
+
+        result = ProblemDataset(
+            train_mod1 = gex_data[train_selector, :][train_mix, :],
+            train_mod2 = atac_genes[train_selector, :],
+            train_sol= sc.AnnData(X = sparse.diags(np.ones(n_train)).tocsr())[train_mix, :],
+            test_mod1 = gex_data[test_selector, :][test_mix, :],
+            test_mod2= atac_genes[test_selector, :],
+            test_sol= sc.AnnData(X = sparse.diags(np.ones(n_test)).tocsr())[test_mix, :],
+            modality1 = 'GEX',
+            modality2 = 'ATAC'
+        )
     elif name == 'benchmark-cite':
         base_path = base_paths[name]
         gex_path = os.path.join(base_path, 'cite_gex_processed_training.h5ad')
@@ -78,6 +135,50 @@ def load_data(name, **kwargs) -> ProblemDataset:
         adt_data = sc.read_h5ad(atac_path)
         # No total_counts is present in gex_data
         gex_data.obs['total_counts'] = np.sum(gex_data.layers['counts'], axis = 1)
+        gex_data.obs['site'] = gex_data.obs['batch'].str.slice(0, 2)
+        gex_data.obs['donor'] = gex_data.obs['batch'].str.slice(2, 4)
+        adt_data.obs['site'] = adt_data.obs['batch'].str.slice(0, 2)
+        adt_data.obs['donor'] = adt_data.obs['batch'].str.slice(2, 4)
+
+        gex_data.uns['modality'] = 'GEX'
+        adt_data.uns['modality'] = 'ADT'
+
+        all_batches = set(gex_data.obs['batch'].unique())
+        test_batches = set(kwargs.pop('test_batches', ['s1d2', 's3d7']))
+        train_batches = all_batches.difference(test_batches)
+        log.info(f'Train batches: {train_batches}')
+        log.info(f'Test batches: {test_batches}')
+        train_selector = gex_data.obs['batch'].isin(train_batches)
+        test_selector = gex_data.obs['batch'].isin(test_batches)
+        n_train = np.sum(train_selector)
+        n_test = np.sum(test_selector)
+        log.info(f'Num train samples: {n_train}')
+        log.info(f'Num test samples: {n_test}')
+
+        train_mix = rng.choice(n_train, size = n_train, replace = False)
+        test_mix = rng.choice(n_test, size = n_test, replace = False)
+
+        result = ProblemDataset(
+            train_mod1 = gex_data[train_selector, :][train_mix, :],
+            train_mod2 = adt_data[train_selector, :],
+            train_sol= sc.AnnData(X = sparse.diags(np.ones(n_train)).tocsr())[train_mix, :],
+            test_mod1 = gex_data[test_selector, :][test_mix, :],
+            test_mod2= adt_data[test_selector, :],
+            test_sol= sc.AnnData(X = sparse.diags(np.ones(n_test)).tocsr())[test_mix, :],
+            modality1 = 'GEX',
+            modality2 = 'ADT'
+        )
+    elif name == 'benchmark-cite-vae':
+        base_path = base_paths[name]
+        gex_path = os.path.join(base_path, 'GEX_VAE.h5ad')
+        atac_path = os.path.join(base_path, 'ADT_VAE.h5ad')
+        # log.info(os.path.abspath(gex_path))
+        log.info(f'Loading {gex_path}')
+        gex_data = sc.read_h5ad(gex_path)
+        log.info(f'Loading {atac_path}')
+        adt_data = sc.read_h5ad(atac_path)
+        # No total_counts is present in gex_data
+        # gex_data.obs['total_counts'] = np.sum(gex_data.layers['counts'], axis = 1)
         gex_data.obs['site'] = gex_data.obs['batch'].str.slice(0, 2)
         gex_data.obs['donor'] = gex_data.obs['batch'].str.slice(2, 4)
         adt_data.obs['site'] = adt_data.obs['batch'].str.slice(0, 2)

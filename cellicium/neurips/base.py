@@ -88,6 +88,7 @@ class ProblemDataset(ProblemDatasetBase):
 class EncoderModel(tfk.Model):
     def __init__(self):
         super().__init__()
+        self.training_plan = None
         self.loss_trackers = {}
         self.add_loss_tracker('reglr_loss')
         self.add_loss_tracker('total_loss')
@@ -126,6 +127,10 @@ class EncoderModel(tfk.Model):
         # The total loss
         losses['total_loss'] = loss_total
         return losses, loss_total
+
+    def set_training_plan(self, plan : nnu.TrainingPlan):
+        self.training_plan = plan
+
 
     def train_step(self, data):
         # GradientTape is a context manager that records every operation that

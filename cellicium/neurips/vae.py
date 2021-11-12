@@ -400,14 +400,14 @@ class AutoencoderManager(base.ModelManagerBase):
         batch = batch.codes.astype('uint8')
         return X, batch
 
-    def train(self, adata : sc.AnnData, **kwargs):
+    def train(self, adata : sc.AnnData, training_plan : VAETrainingPlan, **kwargs):
         layer = kwargs.pop('layer', None)
         X, batch = self.create_inputs(adata, layer)
         dataset = tf.data.Dataset.zip((
             tf.data.Dataset.from_tensor_slices(X),
             tf.data.Dataset.from_tensor_slices(batch)
         ))
-        self.do_train(dataset, adata.n_obs, **kwargs)
+        self.do_train(dataset, adata.n_obs, training_plan, **kwargs)
 
     def latent(self, adata : sc.AnnData):
         X, batch  = self.create_inputs(adata)

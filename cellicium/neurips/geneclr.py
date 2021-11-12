@@ -456,14 +456,18 @@ class DoubleTripletLossLayer(tfk.layers.Layer):
     def distance_2(x1, x2):
         return tf.reduce_sum(tf.square(x1 - x2), axis = -1)
 
+    @staticmethod
+    def distance_1(x1, x2):
+        return tf.reduce_sum(tf.abs(x1 - x2), axis = -1)
+
     def call(self, input, *args, **kwargs):
         ((anchor_z1, positive_z1, negative_z1), (anchor_z2, positive_z2, negative_z2)) = input
-        loss_corresp = (self.distance_2(anchor_z1, anchor_z2) +
-                        self.distance_2(positive_z1, positive_z2) +
-                        self.distance_2(negative_z1, negative_z2))
-
-        ap_distance = self.distance_2(anchor_z1, positive_z1)
-        an_distance = self.distance_2(anchor_z1, negative_z1)
+        distance_f = self.distance_2
+        loss_corresp = (distance_f(anchor_z1, anchor_z2) +
+                        distance_f(positive_z1, positive_z2) +
+                        distance_f(negative_z1, negative_z2))
+        ap_distance = distance_f(anchor_z1, positive_z1)
+        an_distance = distance_f(anchor_z1, negative_z1)
         # Computing the Triplet Loss by subtracting both distances and
         # making sure we don't get a negative value.
         loss_pos_neg = tf.maximum(ap_distance - an_distance + self.margin, 0.0)
@@ -489,8 +493,8 @@ class DoubleTripletModel(base.EncoderModel):
 
     def assemble_block(self, input, last = False):
         x = input
-        # x = tfk.layers.Dense(self.dim_z)(x)
-        x = nnu.LinLogLayer(shape = self.dim_z, log_offset = self.log_offset)(x)
+        x = tfk.layers.Dense(self.dim_z)(x)
+        #x = nnu.LinLogLayer(shape = self.dim_z, log_offset = self.log_offset)(x)
         if not last:
             x = tfk.layers.Lambda(lambda y : tf.math.softplus(y))(x)
         x = tfk.layers.BatchNormalization()(x)
@@ -594,7 +598,8 @@ class DoubleTripletModelManager(base.ModelManagerBase):
 
         return model
 
-    def train(self, ds : base.ProblemDataset, major_modality, minor_modality, n_neighbors = 100, **kwargs):
+    def train(self, ds : base.ProblemDataset, major_modality, minor_modality, n_neighbors,
+              training_plan : nnu.TrainingPlan, **kwargs):
         n_samples = ds.train_mod1.n_obs
         # n_neighbors = kwargs.pop('n_neighbors', 10)
         kwargs['mod1_nvars'] = ds.get_data('train', major_modality).n_vars
@@ -611,7 +616,7 @@ class DoubleTripletModelManager(base.ModelManagerBase):
         X2 = ensure_dense(ds.get_data('train', minor_modality, sort = True).X)
 
         log.info('Computing neighbours...')
-        neighb_model = sknn.NearestNeighbors(n_neighbors = n_neighbors + 1).fit(X1)
+        neighb_model = sknn.NearestNeighbors(n_neighbors = n_neighbors + 1, p = 1).fit(X1)
         __, neighbors = neighb_model.kneighbors(X = X1)
         # Remove the closest point (which is the point itsef at d = 0)
         neighbors = neighbors[:, 1:]
@@ -647,7 +652,7 @@ class DoubleTripletModelManager(base.ModelManagerBase):
         dataset = tf.data.Dataset.from_tensor_slices(tf.range(n_samples))
         triplet_dataset = dataset.map(map_fn, num_parallel_calls = 8, deterministic = False)
 
-        log.info('Creating dataset!')
+        # log.info('Creating dataset!')
         # triplet_dataset = tf.data.Dataset.from_generator(
         #     triplet_generator, output_signature = (
         #         tf.TensorSpec(shape=(), dtype=tf.int32),
@@ -659,8 +664,7 @@ class DoubleTripletModelManager(base.ModelManagerBase):
         #         tf.TensorSpec(shape=(X2.shape[1], ), dtype=tf.float32)
         #     ))
 
-
-        self.do_train(triplet_dataset, n_samples, **kwargs)
+        self.do_train(triplet_dataset, n_samples, training_plan, **kwargs)
 
     def transform_to_common_space(self, adata_list : tp.List[sc.AnnData], unify = False, obs_fields = None):
         Z_list = []
