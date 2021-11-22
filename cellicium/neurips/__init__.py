@@ -16,7 +16,7 @@ from . import vae
 from .siamese import SiamesseModel, SiameseModelManager
 from .geneclr import MultimodalManager
 from . import gmm
-from . import ladder_vae
+# from . import ladder_vae
 
 # def matrix_min_max(X):
 #     i_min = np.argmin(X)

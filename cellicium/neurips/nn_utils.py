@@ -1,9 +1,9 @@
 from cellicium.utils import display
 import tensorflow as tf
 import tensorflow.keras as tfk
-import tensorflow_addons as tfa
 import matplotlib.pyplot as plt
 import scipy.sparse as sparse
+from cellicium.logging import logger as log
 
 
 def ensure_dense(X):
@@ -30,6 +30,17 @@ class LinLogLayer(tfk.layers.Layer):
         x_log = tf.math.exp(x_log)
         x = x_lin + x_log
         return x
+
+class LoggingCallback(tfk.callbacks.Callback):
+    def __init__(self, **kwargs):
+        pass
+
+    def set_offset(self, value):
+        pass
+
+    def on_epoch_end(self, epoch, logs = None):
+        log.info(f'Epoch {epoch} completed')
+
 
 class EpochProgressCallback(tfk.callbacks.Callback):
     def __init__(self, total_num_epochs : int):
@@ -171,6 +182,8 @@ class TrainingPlan(tfk.callbacks.Callback):
         return training_log
 
     def execute_further(self, model, epochs : int, lr : float = None):
+        import tensorflow_addons as tfa
+
         if (self.train_dataset is None) or (self.val_dataset is None):
             raise RuntimeError('Cannot extend training if no initial training is performed')
         if lr is not None:

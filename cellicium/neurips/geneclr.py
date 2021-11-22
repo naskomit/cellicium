@@ -100,8 +100,8 @@ class UnimodeEncoder(base.EncoderModel):
         dense_kwargs = {}
         if self.l1 > 0 or self.l2 > 0:
             dense_kwargs['kernel_regularizer'] = tfk.regularizers.l1_l2(self.l1, self.l2)
-        # x = tfk.layers.Dense(units = self.dim_z, **dense_kwargs)(x)
-        x = nnu.LinLogLayer(shape = self.dim_z, log_offset = 1.0)(x)
+        x = tfk.layers.Dense(units = self.dim_z, **dense_kwargs)(x)
+        # x = nnu.LinLogLayer(shape = self.dim_z, log_offset = 1.0)(x)
         x = tfk.layers.BatchNormalization()(x)
         # if relu:
         x = tfk.layers.Lambda(lambda y : tf.math.softplus(y))(x)
@@ -448,9 +448,16 @@ class DoubleTripletLossLayer(tfk.layers.Layer):
     embedding and the positive embedding, and the anchor embedding and the
     negative embedding.
     """
-    def __init__(self, margin, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, margin, metric = 'l2'):
+        super().__init__()
         self.margin = margin
+        log.info(f'Using {metric} metric')
+        if metric == 'l2':
+            self.distance_f = self.distance_2
+        elif metric == 'l1':
+            self.distance_f = self.distance_1
+        else:
+            raise ValueError('`metric` must be either l1 or l2')
 
     @staticmethod
     def distance_2(x1, x2):
@@ -462,12 +469,12 @@ class DoubleTripletLossLayer(tfk.layers.Layer):
 
     def call(self, input, *args, **kwargs):
         ((anchor_z1, positive_z1, negative_z1), (anchor_z2, positive_z2, negative_z2)) = input
-        distance_f = self.distance_2
-        loss_corresp = (distance_f(anchor_z1, anchor_z2) +
-                        distance_f(positive_z1, positive_z2) +
-                        distance_f(negative_z1, negative_z2))
-        ap_distance = distance_f(anchor_z1, positive_z1)
-        an_distance = distance_f(anchor_z1, negative_z1)
+
+        loss_corresp = (self.distance_f(anchor_z1, anchor_z2) +
+                        self.distance_f(positive_z1, positive_z2) +
+                        self.distance_f(negative_z1, negative_z2))
+        ap_distance = self.distance_f(anchor_z1, positive_z1)
+        an_distance = self.distance_f(anchor_z1, negative_z1)
         # Computing the Triplet Loss by subtracting both distances and
         # making sure we don't get a negative value.
         loss_pos_neg = tf.maximum(ap_distance - an_distance + self.margin, 0.0)
@@ -476,13 +483,14 @@ class DoubleTripletLossLayer(tfk.layers.Layer):
 
 
 class DoubleTripletModel(base.EncoderModel):
-    def __init__(self, dim_in1, dim_in2, dim_z = 20, n_layers = 1, margin = 1.0, correspondance_coeff = 0.01):
+    def __init__(self, dim_in1, dim_in2, dim_z = 20, n_layers = 1, margin = 1.0, correspondance_coeff = 0.01, metric = 'l2'):
         super().__init__()
         self.dim_in1 = dim_in1
         self.dim_in2 = dim_in2
         self.dim_z = dim_z
         self.margin = margin
         self.correspondance_coeff = correspondance_coeff
+        self.metric = metric
         self.add_loss_tracker("corresp_loss", gain = correspondance_coeff)
         self.add_loss_tracker("pos_neg_loss")
         self.dropout_rate = 0.3
@@ -493,17 +501,19 @@ class DoubleTripletModel(base.EncoderModel):
 
     def assemble_block(self, input, last = False):
         x = input
-        x = tfk.layers.Dense(self.dim_z)(x)
-        #x = nnu.LinLogLayer(shape = self.dim_z, log_offset = self.log_offset)(x)
-        if not last:
-            x = tfk.layers.Lambda(lambda y : tf.math.softplus(y))(x)
+        #x = tfk.layers.Dense(self.dim_z)(x)
+        x = nnu.LinLogLayer(shape = self.dim_z, log_offset = self.log_offset)(x)
         x = tfk.layers.BatchNormalization()(x)
         if not last:
-            x = tfk.layers.Dropout(self.dropout_rate)(x)
+            x = tfk.layers.ReLU()(x)
+        #     x = tfk.layers.Lambda(lambda y : tf.math.softmax(y))(x)
+        # if not last:
+        x = tfk.layers.Dropout(self.dropout_rate)(x)
         return x
 
     def assemble_encoder(self, input):
         x = input
+        # x = tfk.layers.Lambda(lambda y : tf.math.softplus(y))(x)
         for i in range(self.n_layers):
             last = (i == self.n_layers - 1)
             x = self.assemble_block(x, last = last)
@@ -535,7 +545,7 @@ class DoubleTripletModel(base.EncoderModel):
         negative_z2 = encoder2(negative_input_mod2)
 
         # Add a layer computing the losses
-        self.loss_layer = DoubleTripletLossLayer(self.margin)
+        self.loss_layer = DoubleTripletLossLayer(margin = self.margin, metric = self.metric)
         model_losses = self.loss_layer(((anchor_z1, positive_z1, negative_z1), (anchor_z2, positive_z2, negative_z2)))
 
         network = tfk.Model(inputs = [anchor_index, anchor_input_mod1, positive_input_mod1, negative_input_mod1, anchor_input_mod2, positive_input_mod2, negative_input_mod2],
@@ -570,7 +580,7 @@ class DoubleTripletModelManager(base.ModelManagerBase):
         self.modality_encoders = {}
         for modality, model in zip(modalities, [self.model.encoder1, self.model.encoder2]):
             self.modality_encoders[modality] = model
-            filepath = os.path.join(dir, modality + '.h5')
+            filepath = os.path.join(dir, modality + '_encoder.h5')
             model.load_weights(filepath)
             log.info(f'Loaded encoder for {modality} from {filepath}')
 
@@ -586,11 +596,8 @@ class DoubleTripletModelManager(base.ModelManagerBase):
 
         modality1 = kwargs.pop('modality1')
         modality2 = kwargs.pop('modality2')
-        margin = kwargs.pop('margin')
-        correspondance_coeff = kwargs.pop('correspondance_coeff')
         model = DoubleTripletModel(
-            dim_in1 = mod1_nvars, dim_in2 = mod2_nvars, dim_z = self.dim_z, n_layers = self.n_layers,
-            margin = margin, correspondance_coeff = correspondance_coeff)
+            dim_in1 = mod1_nvars, dim_in2 = mod2_nvars, dim_z = self.dim_z, n_layers = self.n_layers, **kwargs)
 
         self.modality_encoders = {
             modality1 : model.encoder1, modality2 : model.encoder2
@@ -694,6 +701,16 @@ class DoubleTripletModelManager(base.ModelManagerBase):
                                          uns = {'modality': modality}))
 
         return result
+
+    def joint_embedding(self, adata_list : tp.List[sc.AnnData]) -> sc.AnnData:
+        z1_adata, z2_adata = self.transform_to_common_space(adata_list, unify = False)
+        # Ensure they have the same order
+        z2_adata = z2_adata[z1_adata.obs.index, :]
+        z_X = (z1_adata.X + z2_adata.X) / 2.0
+        z_data = sc.AnnData(X = z_X, var = z1_adata.var, obs = z1_adata.obs)
+        return z_data
+
+
 
     def plot_integration_umap(self, adata_list : tp.List[sc.AnnData], color = None, obs_fields = None):
         adata = self.transform_to_common_space(adata_list, unify = True, obs_fields = obs_fields)

@@ -82,6 +82,11 @@ def load_data(name, **kwargs) -> ProblemDataset:
         log.info(f'Loading ATAC gene weights from {gene_weigths_loc}')
         gene_weights = sc.read_h5ad(gene_weigths_loc)
 
+        # Keep only the corresponding cells
+        common_umi = gex_data.obs[gex_data.obs.index.isin(atac_data.obs.index)].index
+        gex_data = gex_data[common_umi, :].copy()
+        atac_data = atac_data[common_umi, :].copy()
+
         # No total_counts is present in gex_data
         gex_data.obs['total_counts'] = np.sum(gex_data.layers['counts'], axis = 1)
         gex_data.obs['site'] = gex_data.obs['batch'].str.slice(0, 2)
@@ -90,7 +95,13 @@ def load_data(name, **kwargs) -> ProblemDataset:
         atac_data.obs['donor'] = atac_data.obs['batch'].str.slice(2, 4)
 
         log.info(f'Associating peaks with genes')
-        atac_gene_counts = np.dot(atac_data.X, gene_weights.X.T)
+        use_counts = kwargs.pop('use_counts', True)
+        if use_counts:
+            log.info('Using count ATAC matrix')
+            atac_gene_counts = np.dot(atac_data.layers['counts'], gene_weights.X.T)
+        else:
+            log.info('Using binary ATAC matrix')
+            atac_gene_counts = np.dot(atac_data.X, gene_weights.X.T)
         atac_genes = sc.AnnData(X = atac_gene_counts, obs = atac_data.obs, var = gene_weights.obs)
         atac_genes.layers['counts'] = atac_genes.X
         del atac_data
@@ -271,6 +282,25 @@ def load_data(name, **kwargs) -> ProblemDataset:
             modality2 = modality2
         )
 
+    elif name == 'run-joint':
+        input_mod1 = sc.read_h5ad(kwargs['input_mod1'])
+        input_mod2 = sc.read_h5ad(kwargs['input_mod2'])
+        modality1 = input_mod1.var['feature_types'][0]
+        modality2 = input_mod2.var['feature_types'][0]
+
+        input_mod1.uns['modality'] = modality1
+        input_mod2.uns['modality'] = modality2
+
+        result = ProblemDataset(
+            train_mod1 = input_mod1,
+            train_mod2 = input_mod2,
+            train_sol= sc.AnnData(X = sparse.diags(range(input_mod1.n_obs))),
+            test_mod1 = input_mod1,
+            test_mod2= input_mod2,
+            test_sol= None,
+            modality1 = modality1,
+            modality2 = modality2
+        )
 
     else:
         raise ValueError(f'Unknown dataset {name}, available data sets are: {base_paths.keys()}')

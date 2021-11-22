@@ -5,7 +5,6 @@ import abc
 import typing as tp
 import tensorflow as tf
 import tensorflow.keras as tfk
-import tensorflow_addons as tfa
 from . import nn_utils as nnu
 
 ProblemDatasetBase = coll.namedtuple(
@@ -187,7 +186,11 @@ class ModelManagerBase(abc.ABC):
     def do_train(self, dataset : tf.data.Dataset, n_samples, training_plan : nnu.TrainingPlan, **kwargs):
         tf.random.set_seed(self.seed)
         self.training_plan = training_plan
-        self.progress_tracker = nnu.EpochProgressCallback(training_plan.epochs)
+        progress_tracker = kwargs.pop('progress_tracker', True)
+        if progress_tracker:
+            self.progress_tracker = nnu.EpochProgressCallback(training_plan.epochs)
+        else:
+            self.progress_tracker = nnu.LoggingCallback()
 
         self.model = self.build_model(**kwargs)
         self.model.set_training_plan(training_plan)

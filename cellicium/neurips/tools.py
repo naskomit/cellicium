@@ -19,7 +19,10 @@ import typing as tp
 
 def nmf_activity(adata : sc.AnnData, nmf_spectra, normalize = True):
     genes = nmf_spectra.columns.values
+    genes = genes[np.isin(genes, adata.var.index.values)]
+    log.info(f'NMF using {genes.shape[0]} variables')
     norm_counts = adata[:, genes].copy()
+    nmf_spectra = nmf_spectra.loc[:, genes]
 
     sc.pp.scale(norm_counts, zero_center=False)
     if np.isnan(norm_counts.X.data).sum() > 0:
@@ -461,3 +464,6 @@ def check_neighbors_across_modalities(ds : ProblemDataset, p_metric = 1, n_neigh
     neighbors_train_2 = neighbors_train_2[:, 1:]
 
     return neighbors_train_1, neighbors_train_2
+
+def compute_pairwise_regression(adata1 : sc.AnnData, adata2 : sc.AnnData):
+    pass
